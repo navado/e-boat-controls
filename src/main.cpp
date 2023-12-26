@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
-#include <TimeInterrupt.h>
+#include "TimerInterrupt_Generic.h"
 
 #ifdef U8X8_HAVE_HW_SPI
 #include <SPI.h>
@@ -12,6 +12,7 @@
 /* ------------ PINOUT ---------------*/
 #pragma region PINOUT
 
+#if defined(BOARD_ARDUINO_NANO)
 #define CS_PIN 8
 #define RSE_PIN 7
 #define RS_PIN 6
@@ -24,10 +25,6 @@
 
 #define RPM_PIN 5
 
-#define NUM_PWM_PINS 5
-uint8_t pwm_pin_test_intex = 0;
-uint8_t pwm_pins_to_test[] = {3, 6, 9, 10, 11};
-
 #define THROTTLE_IN A0
 #define THROTTLE_OUT 3 // PWM
 
@@ -35,7 +32,30 @@ uint8_t pwm_pins_to_test[] = {3, 6, 9, 10, 11};
 #define BTN_C A3
 #define BTN_B A4
 #define BTN_A A5
-#define BTN_PRESS_THRESHOLD 4
+#elif defined(BOARD_BLUEPILL)
+
+
+#define CS_PIN PC14
+#define RST_PIN PC15
+#define RS_PIN PA0
+#define SCL_PIN PA1
+#define SDO_PIN PA2
+#define SDI_PIN PB5
+#define BACKLIGHT_PIN PA3 // PWM
+#define LED_BRD LED_BUILTIN
+
+#define RPM_PIN PB5 
+
+#define THROTTLE_IN PB1  //  ADC8
+#define THROTTLE_OUT PB0 // PWM 19
+
+#define BTN_D PB6
+#define BTN_C PB7
+#define BTN_B PB8
+#define BTN_A PB9
+#endif
+
+#define BTN_PRESS_THRESHOLD 1
 #define BTN_LONG_PRESS_THRESHOLD 60
 #define BTN_MAX_DURATION 120
 #pragma endregion
@@ -50,7 +70,7 @@ U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
                                         /* data=*/SDO_PIN,
                                         /* cs=*/CS_PIN,
                                         /* dc=*/RS_PIN,
-                                        /* reset=*/RSE_PIN
+                                        /* reset=*/RST_PIN
                                         );
 
 #pragma endregion
@@ -59,15 +79,14 @@ U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
 #pragma region Variables
 volatile uint8_t frames = 0;
 volatile uint8_t fps = 0;
-volatile uint16_t cnt, cnt_raw = 0;
+volatile uint16_t cnt, cnt_raw = 0, ticks = 0;
 
 
-#define THROTTLE_TABLE_SIZE 12
-const uint8_t throttle_table[] = {1, 80, 90, 110, 125, 145, 165, 185, 205, 224, 244, 254};
+#define THROTTLE_TABLE_SIZE 11
+const uint8_t throttle_table[] = {245, 224, 185, 145, 110, 1, 110, 145, 185, 224, 254};
+#define SPD_NEUTRAL 5
 
-volatile int8_t throttle_index = 0; // to handle decreases
-volatile uint8_t throttle_out_value = 0;
-#define THROTTLE_IN_STEP (499/1024.0)
+
 volatile uint16_t throttle_in_value = 0;
 
 typedef struct
@@ -82,6 +101,13 @@ btn_state_t * btn_b = &buttons_state[1];
 btn_state_t * btn_c = &buttons_state[2];
 btn_state_t * btn_d = &buttons_state[3];
 
+
+volatile struct panel_state_ {
+  uint8_t mode: 1; // 0 - OFF, 1 - ON
+  uint8_t regen: 1; // 0 - OFF, 1 - ON
+  uint8_t speed: 6; // 0 - 11 index in throttle_table
+  uint16_t rpm :16;
+} panel_state = {0};
 #pragma endregion
 
 /* ------------ Functions ------------------*/
@@ -102,26 +128,60 @@ void update_buttons(){
   update_button_state(3, digitalRead(BTN_D));
 }
 
-void setup_timer1_counter(){
-  pinMode(RPM_PIN, INPUT);
-  
+void setup_rpm_counter(){
+  // pinMode(RPM_PIN, INPUT);
+  #if defined(BOARD_ARDUINO_NANO)
   TCCR1A=0; // setup timer-1
   TCCR1C=0;
   TIMSK1=0;
   GTCCR=0;
   TCCR1B=0b00000110; // falling edge
+  #endif
+
 }
+
+void run_every_1s(){
+  #if defined(BOARD_ARDUINO_NANO)
+  cnt = TCNT1;
+  TCNT1=0;
+  #endif
+  panel_state.rpm = cnt;
+  cnt=0;
+}
+
+void run_every_100ms(){
+  // update_buttons();
+  throttle_in_value = analogRead(THROTTLE_IN);
+  ticks++;
+  cnt++;
+  if (ticks % 10 == 0){
+    run_every_1s();
+  }
+}
+
+#if defined(BOARD_ARDUINO_NANO)
+TimerInterrupt timer1(1);
+
+void setup_timing_functions(){
+  timer1.attachInterruptInterval(100, run_every_100ms);
+}
+#elif defined(BOARD_BLUEPILL)
+STM32TimerInterrupt timer1(TIM1);
+
+void setup_timing_functions(){
+  timer1.attachInterruptInterval(100000, run_every_100ms);
+}
+#endif
 
 void setup() {
   Serial.begin(115200);
   // Prepare keepalive LED
-  pinMode(LED_BRD_RD, OUTPUT);
-  digitalWrite(LED_BRD_RD, HIGH);
-  pinMode(LED_BRD_GR, OUTPUT);
-  digitalWrite(LED_BRD_GR, LOW);
+  pinMode(LED_BRD, OUTPUT);
+  digitalWrite(LED_BRD, HIGH);
+
   
   // Prepare backlight
-  
+  pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWrite(BACKLIGHT_PIN, backlight_value);
   
   lcd.begin();
@@ -131,27 +191,12 @@ void setup() {
   Serial.println("LCD Init Done");
 
   // Prepare timings
-  TimeInterrupt.begin(PRECISION);
-  TimeInterrupt.addInterrupt([]()
-                             {
-                              cnt = TCNT1;
-                              TCNT1=0;
-                              fps = frames;
-                              frames = 0;
-                              },
-                             1000); // 1s
-  TimeInterrupt.addInterrupt([]()
-                             {
-                              throttle_in_value = analogRead(THROTTLE_IN); 
-                              update_buttons();
-                             },
-                             100); // 100ms
-
+  setup_timing_functions();
 
   // Throttle
   pinMode(THROTTLE_IN, INPUT);
   pinMode(THROTTLE_OUT, OUTPUT);
-  analogReference(DEFAULT);
+  analogWrite(THROTTLE_OUT, throttle_table[panel_state.speed]);
 
   // Buttons
   pinMode(BTN_A, INPUT);
@@ -159,18 +204,25 @@ void setup() {
   pinMode(BTN_C, INPUT);
   pinMode(BTN_D, INPUT);
 
+  pinMode(RPM_PIN, INPUT_PULLUP);
+  attachInterrupt(RPM_PIN, [](){
+    cnt++;
+  }, CHANGE);
+  attachInterrupt(BTN_A, [](){ // Throttle UP
+    update_button_state(0, digitalRead(BTN_A));
+  }, RISING);
+  attachInterrupt(BTN_B, [](){ // Throttle DOWN
+    update_button_state(1, digitalRead(BTN_B));
+  }, RISING);
+  attachInterrupt(BTN_C, [](){ // Reverse
+    update_button_state(2, digitalRead(BTN_C));
+  }, RISING);
+  attachInterrupt(BTN_D, [](){ // REGEN
+    update_button_state(3, digitalRead(BTN_D));
+  }, RISING);
+  panel_state.speed = SPD_NEUTRAL;
   // Timers/counters
-  // setup_timer1_counter();
-
-  // iterate over all pins and send to serial theit timer mapping for analogWrite
-  for (uint8_t i = 0; i < NUM_PWM_PINS; i++){
-    uint8_t pin = pwm_pins_to_test[i];
-    Serial.print("Pin: ");
-    Serial.print(pin);
-    Serial.print(" Timer: ");
-    Serial.println(digitalPinToTimer(pin));
-    analogWrite(pin, 50);
-  }
+  setup_rpm_counter();
 }
 
 #pragma region UI
@@ -204,44 +256,14 @@ uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, const char * value){
 void printColumn1(){
   uint8_t _x=2, _y = 8;
   _y = printKWLabel(_x, _y, "CNT: ", cnt);
-  _y = printKWLabel(_x, _y, "RPM: ", cnt * 10);
-  _y = printKWLabel(_x, _y, "T: ", millis()/1000);
-  _y = printKWLabel(_x, _y, "FPS: ", fps);
 }
 
-const char * btn_to_str_value(uint8_t btn){
-  switch (btn)
-  {
-  case 0:
-    return "OFF";
-  case 1:
-    return "ON";
-  default:
-    return "ERR";
-  }
-}
-
-uint8_t print_btn_state(uint8_t _x, uint8_t _y, uint8_t index){
-  btn_state_t * btn = &buttons_state[index];
-  lcd.setFont(u8g2_font_5x8_tf);
-  lcd.setCursor(_x, _y);
-  lcd.print("B-");
-  lcd.print((char)(index + 'A'));
-  lcd.print(": ");
-  lcd.print(btn_to_str_value(btn->state));
-  lcd.print(" ");
-  lcd.print(btn->count);
-  return _y+8;
-}
 
 void printColumn2(){
   uint8_t _x=64, _y = 8;
-  _y = printKWLabel(_x, _y, "T/I: ", throttle_index);
-  _y = printKWLabel(_x, _y, "T/O: ", throttle_out_value);
+  _y = printKWLabel(_x, _y, "T/I: ", panel_state.speed);
+  _y = printKWLabel(_x, _y, "T/O: ", throttle_table[panel_state.speed]);
   _y = printKWLabel(_x, _y, "T/V: ", map(throttle_in_value, 0, 1023, 0, 500));
-  for (uint8_t i = 0;i<4;i++){
-    _y = print_btn_state(_x,_y, i);
-  }
 }
 
 void printSmileyFont(uint8_t index){
@@ -250,18 +272,26 @@ void printSmileyFont(uint8_t index){
   lcd.print(index);
 }
 
+void printBigLabel(){
+  lcd.setFont(u8g2_font_inb21_mr);
+  lcd.setCursor(2, 63);
+  if(panel_state.mode == 0){
+    lcd.print("OFF");
+  } else {
+    lcd.print(panel_state.speed==SPD_NEUTRAL?"N":(panel_state.speed < SPD_NEUTRAL?"R":"F"));
+    lcd.print(panel_state.rpm);
+  }
+}
+
 void draw_screen(){
   analogWrite(BACKLIGHT_PIN, backlight_value);
   frames++;
   lcd.firstPage();
   do
   {
-    lcd.drawFrame(0, 0, 127, 63);
     printColumn1();
     printColumn2();
-    // printSmiley(62+30,31,30);
-    printSmileyFont(frames%10);
-
+    printBigLabel();
   } while (lcd.nextPage());
 }
 #pragma endregion
@@ -288,38 +318,51 @@ void draw_screen(){
 // }
 
 void handle_throttle(){
-  analogWrite(THROTTLE_OUT, throttle_out_value);
+
   if (btn_a->state == btn_b->state)
     return;
 
   if (btn_a->count == BTN_PRESS_THRESHOLD){
     btn_a->count = btn_a->count + 1;
-    throttle_index = min(throttle_index + 1, THROTTLE_TABLE_SIZE - 1);
+    panel_state.speed = min(panel_state.speed + 1, THROTTLE_TABLE_SIZE - 1);
   }
 
   if(btn_a->count == BTN_LONG_PRESS_THRESHOLD){
     btn_a->count = btn_a->count + 1;
-    throttle_index = min(throttle_index + 4, THROTTLE_TABLE_SIZE - 1);
+    panel_state.speed = min(panel_state.speed + 4, THROTTLE_TABLE_SIZE - 1);
   }
 
   if (btn_b->count == BTN_PRESS_THRESHOLD){
     btn_b->count = btn_b->count + 1;
-    throttle_index = max(throttle_index - 1, 0);
+    panel_state.speed = max(panel_state.speed - 1, 0);
   }
 
   if (btn_b->count == BTN_PRESS_THRESHOLD){
     btn_b->count = btn_b->count + 1;
-    throttle_index = max(throttle_index - 4, 0);
+    panel_state.speed = max(panel_state.speed - 4, 0);
   }
+  analogWrite(THROTTLE_OUT, throttle_table[panel_state.speed]);
+}
 
+void handle_state(){
+  if (btn_c->state==btn_d->state) return;
 
-  throttle_out_value = throttle_table[throttle_index];
+  if (btn_c->count == BTN_PRESS_THRESHOLD){
+    panel_state.mode = !panel_state.mode;
+    if (panel_state.mode == 0){
+      panel_state.speed = SPD_NEUTRAL;
+    }
+  }
+  if (btn_d->count == BTN_PRESS_THRESHOLD ){
+    panel_state.regen = !panel_state.regen;
+  }
 }
 
 void loop()
 {
   // digitalWrite(LED_BRD_GR, !digitalRead(LED_BRD_GR));
-  digitalWrite(LED_BRD_RD, !digitalRead(LED_BRD_RD));
+  digitalWrite(LED_BRD, !digitalRead(LED_BRD));
   handle_throttle();
+  handle_state();
   draw_screen();
 }
