@@ -15,17 +15,21 @@
 #define CS_PIN 8
 #define RSE_PIN 7
 #define RS_PIN 6
-#define SCL_PIN 5
+#define SCL_PIN 12 // to release 11 for PWM
 #define SDO_PIN 4
 #define SDI_PIN 10
-#define BACKLIGHT_PIN 9
-#define LED_BRD_RD 2
+#define BACKLIGHT_PIN 11 // PWM
+#define LED_BRD_RD 13
 #define LED_BRD_GR 10
 
-#define RPM_PIN 3
+#define RPM_PIN 5
+
+#define NUM_PWM_PINS 5
+uint8_t pwm_pin_test_intex = 0;
+uint8_t pwm_pins_to_test[] = {3, 6, 9, 10, 11};
 
 #define THROTTLE_IN A0
-#define THROTTLE_OUT 10
+#define THROTTLE_OUT 3 // PWM
 
 #define BTN_D A2
 #define BTN_C A3
@@ -33,11 +37,13 @@
 #define BTN_A A5
 #define BTN_PRESS_THRESHOLD 4
 #define BTN_LONG_PRESS_THRESHOLD 60
+#define BTN_MAX_DURATION 120
 #pragma endregion
 /* ------------ LCD ------------------*/
 
 #pragma region LCD
 #define CONTRAST_SETTING 0x3A
+uint8_t backlight_value = 30;
 
 U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
                                         /* clock=*/SCL_PIN,
@@ -57,9 +63,9 @@ volatile uint16_t cnt, cnt_raw = 0;
 
 
 #define THROTTLE_TABLE_SIZE 12
-const uint8_t throttle_table[] = {0, 66, 86, 106, 125, 145, 165, 185, 205, 224, 244, 255};
+const uint8_t throttle_table[] = {1, 80, 90, 110, 125, 145, 165, 185, 205, 224, 244, 254};
 
-volatile uint8_t throttle_index = 0;
+volatile int8_t throttle_index = 0; // to handle decreases
 volatile uint8_t throttle_out_value = 0;
 #define THROTTLE_IN_STEP (499/1024.0)
 volatile uint16_t throttle_in_value = 0;
@@ -96,6 +102,16 @@ void update_buttons(){
   update_button_state(3, digitalRead(BTN_D));
 }
 
+void setup_timer1_counter(){
+  pinMode(RPM_PIN, INPUT);
+  
+  TCCR1A=0; // setup timer-1
+  TCCR1C=0;
+  TIMSK1=0;
+  GTCCR=0;
+  TCCR1B=0b00000110; // falling edge
+}
+
 void setup() {
   Serial.begin(115200);
   // Prepare keepalive LED
@@ -105,7 +121,8 @@ void setup() {
   digitalWrite(LED_BRD_GR, LOW);
   
   // Prepare backlight
-  analogWrite(BACKLIGHT_PIN, 30);
+  
+  analogWrite(BACKLIGHT_PIN, backlight_value);
   
   lcd.begin();
   lcd.setFont(u8g2_font_5x8_tf);
@@ -117,21 +134,19 @@ void setup() {
   TimeInterrupt.begin(PRECISION);
   TimeInterrupt.addInterrupt([]()
                              {
+                              cnt = TCNT1;
+                              TCNT1=0;
                               fps = frames;
                               frames = 0;
-                              cnt = cnt_raw;
-                              cnt_raw = 0; },
+                              },
                              1000); // 1s
   TimeInterrupt.addInterrupt([]()
-                             { throttle_in_value = analogRead(THROTTLE_IN); 
-                             update_buttons();
+                             {
+                              throttle_in_value = analogRead(THROTTLE_IN); 
+                              update_buttons();
                              },
                              100); // 100ms
 
-  pinMode(RPM_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(RPM_PIN), []() {
-    cnt_raw++;
-  }, FALLING);
 
   // Throttle
   pinMode(THROTTLE_IN, INPUT);
@@ -144,6 +159,18 @@ void setup() {
   pinMode(BTN_C, INPUT);
   pinMode(BTN_D, INPUT);
 
+  // Timers/counters
+  // setup_timer1_counter();
+
+  // iterate over all pins and send to serial theit timer mapping for analogWrite
+  for (uint8_t i = 0; i < NUM_PWM_PINS; i++){
+    uint8_t pin = pwm_pins_to_test[i];
+    Serial.print("Pin: ");
+    Serial.print(pin);
+    Serial.print(" Timer: ");
+    Serial.println(digitalPinToTimer(pin));
+    analogWrite(pin, 50);
+  }
 }
 
 #pragma region UI
@@ -211,7 +238,7 @@ void printColumn2(){
   uint8_t _x=64, _y = 8;
   _y = printKWLabel(_x, _y, "T/I: ", throttle_index);
   _y = printKWLabel(_x, _y, "T/O: ", throttle_out_value);
-  _y = printKWLabel(_x, _y, "T/V: ", throttle_in_value * THROTTLE_IN_STEP);
+  _y = printKWLabel(_x, _y, "T/V: ", map(throttle_in_value, 0, 1023, 0, 500));
   for (uint8_t i = 0;i<4;i++){
     _y = print_btn_state(_x,_y, i);
   }
@@ -224,6 +251,7 @@ void printSmileyFont(uint8_t index){
 }
 
 void draw_screen(){
+  analogWrite(BACKLIGHT_PIN, backlight_value);
   frames++;
   lcd.firstPage();
   do
@@ -238,20 +266,53 @@ void draw_screen(){
 }
 #pragma endregion
 
+// typedef enum{
+//   RELEASED = 0,
+//   PRESSED = 1,
+//   LONG_PRESSED = 2,
+//   MAX_DURATION = 3,
+//   OTHER = 4
+// } button_state_t;
+
+// button_state_t get_button_state(uint8_t index){
+//   btn_state_t * btn = &buttons_state[index];
+//   if (btn->state == 0)
+//     return RELEASED;
+//   if (btn->count == BTN_PRESS_THRESHOLD)
+//     return PRESSED;
+//   if (btn->count == BTN_LONG_PRESS_THRESHOLD)
+//     return LONG_PRESSED;
+//   if (btn->count == BTN_MAX_DURATION)
+//     return MAX_DURATION;
+//   return OTHER;
+// }
+
 void handle_throttle(){
   analogWrite(THROTTLE_OUT, throttle_out_value);
-  if (btn_a->state == 1 && btn_b->state == 0 && btn_a->count == BTN_PRESS_THRESHOLD){
+  if (btn_a->state == btn_b->state)
+    return;
+
+  if (btn_a->count == BTN_PRESS_THRESHOLD){
     btn_a->count = btn_a->count + 1;
-    if(throttle_index != THROTTLE_TABLE_SIZE - 1){
-      throttle_index = (throttle_index + 1) % THROTTLE_TABLE_SIZE;
-    }
+    throttle_index = min(throttle_index + 1, THROTTLE_TABLE_SIZE - 1);
   }
-  if (btn_b->state == 1 && btn_a->state == 0 && btn_b->count == BTN_PRESS_THRESHOLD){
+
+  if(btn_a->count == BTN_LONG_PRESS_THRESHOLD){
+    btn_a->count = btn_a->count + 1;
+    throttle_index = min(throttle_index + 4, THROTTLE_TABLE_SIZE - 1);
+  }
+
+  if (btn_b->count == BTN_PRESS_THRESHOLD){
     btn_b->count = btn_b->count + 1;
-    if (throttle_index != 0){
-      throttle_index = (throttle_index - 1) % THROTTLE_TABLE_SIZE;
-    }
+    throttle_index = max(throttle_index - 1, 0);
   }
+
+  if (btn_b->count == BTN_PRESS_THRESHOLD){
+    btn_b->count = btn_b->count + 1;
+    throttle_index = max(throttle_index - 4, 0);
+  }
+
+
   throttle_out_value = throttle_table[throttle_index];
 }
 
