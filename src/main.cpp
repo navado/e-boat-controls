@@ -55,9 +55,14 @@
 #define BTN_A PB9
 #endif
 
-#define BTN_PRESS_THRESHOLD 1
-#define BTN_LONG_PRESS_THRESHOLD 60
+#define BTN_PRESS_THRESHOLD 2
+#define BTN_LONG_PRESS_THRESHOLD 40
 #define BTN_MAX_DURATION 120
+
+#define BTN_MILLS ((millis()/100) & 0x003F)
+#define BTN_PRESS(btn)  (btn->state == 1 && BTN_MILLS - btn->t > BTN_PRESS_THRESHOLD)
+#define BTN_LONG_PRESS(btn)  (btn->state == 1 && BTN_MILLS - btn->t > BTN_LONG_PRESS_THRESHOLD)
+
 #pragma endregion
 /* ------------ LCD ------------------*/
 
@@ -91,9 +96,25 @@ volatile uint16_t throttle_in_value = 0;
 
 typedef struct
 {
-  uint8_t state : 1; // 0 - released, 1 - pressed
-  uint8_t count: 7;
+  union{
+    struct {
+      uint8_t state : 1; // 0 - released, 1 - pressed
+      uint8_t ov: 1;
+      uint8_t t: 6;
+    };
+    uint8_t input;
+  };
+  union{
+  struct{
+    uint8_t short_press : 1;
+    uint8_t long_press : 1;
+    uint8_t very_long_press : 1;
+    uint8_t ht : 6;
+  };
+  uint8_t handle;
+  };
 } btn_state_t;
+
 
 btn_state_t buttons_state[4] = {0};
 btn_state_t * btn_a = &buttons_state[0];
@@ -102,9 +123,15 @@ btn_state_t * btn_c = &buttons_state[2];
 btn_state_t * btn_d = &buttons_state[3];
 
 
+
 volatile struct panel_state_ {
-  uint8_t mode: 1; // 0 - OFF, 1 - ON
+  union{
+    struct{
+  uint8_t power: 1; // 0 - OFF, 1 - ON
   uint8_t regen: 1; // 0 - OFF, 1 - ON
+    };
+    uint8_t mode:2;
+  };
   uint8_t speed: 6; // 0 - 11 index in throttle_table
   uint16_t rpm :16;
 } panel_state = {0};
@@ -114,10 +141,17 @@ volatile struct panel_state_ {
 
 void update_button_state(uint8_t index, uint8_t value){
   btn_state_t * btn = &buttons_state[index];
+
+  if(BTN_MILLS - btn->t > BTN_MAX_DURATION){
+    btn->ov = 1; // very long press
+  }
+  if (btn->state != value){
+    btn->t = BTN_MILLS; // Store change time
+  }
   btn->state = value;
-  btn->count = (btn->state == 1 && btn->count<120)? btn->count + 1 : btn->count;
   if (btn->state == 0){
-    btn->count = 0;
+    btn->input = 0;
+    btn->handle = 0;
   }
 }
 
@@ -210,16 +244,16 @@ void setup() {
   }, CHANGE);
   attachInterrupt(BTN_A, [](){ // Throttle UP
     update_button_state(0, digitalRead(BTN_A));
-  }, RISING);
+  }, CHANGE);
   attachInterrupt(BTN_B, [](){ // Throttle DOWN
     update_button_state(1, digitalRead(BTN_B));
-  }, RISING);
+  }, CHANGE);
   attachInterrupt(BTN_C, [](){ // Reverse
     update_button_state(2, digitalRead(BTN_C));
-  }, RISING);
+  }, CHANGE);
   attachInterrupt(BTN_D, [](){ // REGEN
     update_button_state(3, digitalRead(BTN_D));
-  }, RISING);
+  }, CHANGE);
   panel_state.speed = SPD_NEUTRAL;
   // Timers/counters
   setup_rpm_counter();
@@ -256,6 +290,8 @@ uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, const char * value){
 void printColumn1(){
   uint8_t _x=2, _y = 8;
   _y = printKWLabel(_x, _y, "CNT: ", cnt);
+  _y = printKWLabel(_x, _y, "T: ", millis()/1000);
+  _y = printKWLabel(_x, _y, "PWR: ", btn_c->t);
 }
 
 
@@ -273,13 +309,16 @@ void printSmileyFont(uint8_t index){
 }
 
 void printBigLabel(){
-  lcd.setFont(u8g2_font_inb21_mr);
-  lcd.setCursor(2, 63);
+  lcd.setFont(u8g2_font_inb30_mr);
+  lcd.setCursor(0, 63);
   if(panel_state.mode == 0){
     lcd.print("OFF");
+  } else if (panel_state.regen == 1){
+    lcd.print("REGEN");
   } else {
     lcd.print(panel_state.speed==SPD_NEUTRAL?"N":(panel_state.speed < SPD_NEUTRAL?"R":"F"));
-    lcd.print(panel_state.rpm);
+    // lcd.print(panel_state.rpm);
+    lcd.print(9999);
   }
 }
 
@@ -322,38 +361,61 @@ void handle_throttle(){
   if (btn_a->state == btn_b->state)
     return;
 
-  if (btn_a->count == BTN_PRESS_THRESHOLD){
-    btn_a->count = btn_a->count + 1;
+  if (panel_state.power == 0 || panel_state.regen == 1)
+    return;
+
+  if (BTN_PRESS(btn_a) && btn_a->short_press == 0){
+    btn_a->short_press = 1;
+    btn_a->ht = BTN_MILLS;
     panel_state.speed = min(panel_state.speed + 1, THROTTLE_TABLE_SIZE - 1);
   }
 
-  if(btn_a->count == BTN_LONG_PRESS_THRESHOLD){
-    btn_a->count = btn_a->count + 1;
-    panel_state.speed = min(panel_state.speed + 4, THROTTLE_TABLE_SIZE - 1);
+  if(BTN_LONG_PRESS(btn_a) && btn_a->long_press == 0){
+    btn_a->long_press = 1;
+    btn_a->ht = BTN_MILLS;
+    if(panel_state.speed > SPD_NEUTRAL) { // Forward to faster
+      panel_state.speed = min(panel_state.speed + 4, THROTTLE_TABLE_SIZE - 1);
+    } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Forward
+      panel_state.speed = SPD_NEUTRAL;
+    } else { // Reverse to Neutral
+      panel_state.speed = SPD_NEUTRAL;
+    }
   }
 
-  if (btn_b->count == BTN_PRESS_THRESHOLD){
-    btn_b->count = btn_b->count + 1;
+  if (BTN_PRESS(btn_b) && btn_b->short_press == 0){
+    btn_b->short_press = 1;
+    btn_a->ht = BTN_MILLS;
     panel_state.speed = max(panel_state.speed - 1, 0);
   }
 
-  if (btn_b->count == BTN_PRESS_THRESHOLD){
-    btn_b->count = btn_b->count + 1;
-    panel_state.speed = max(panel_state.speed - 4, 0);
+  if (BTN_LONG_PRESS(btn_b) && btn_b->long_press == 0){
+    btn_b->long_press = 1;
+    btn_a->ht = BTN_MILLS;
+    if(panel_state.speed > SPD_NEUTRAL) { // Forward to Neutral
+      panel_state.speed = max(panel_state.speed - 4, SPD_NEUTRAL);
+    } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Reverse
+      panel_state.speed = SPD_NEUTRAL;
+    } else { // Reverse to faster
+      panel_state.speed = 0;
+    }
   }
   analogWrite(THROTTLE_OUT, throttle_table[panel_state.speed]);
 }
 
 void handle_state(){
   if (btn_c->state==btn_d->state) return;
-
-  if (btn_c->count == BTN_PRESS_THRESHOLD){
-    panel_state.mode = !panel_state.mode;
-    if (panel_state.mode == 0){
+  
+  if (BTN_PRESS(btn_c) && btn_c->short_press ==0 && panel_state.regen == 0 && panel_state.speed == SPD_NEUTRAL){
+    btn_c->short_press = 1;
+    btn_a->ht = BTN_MILLS;
+    panel_state.power = !panel_state.power;
+    if (panel_state.power == 0){
       panel_state.speed = SPD_NEUTRAL;
     }
   }
-  if (btn_d->count == BTN_PRESS_THRESHOLD ){
+  if (BTN_PRESS(btn_d) && btn_d->short_press ==0 && panel_state.power == 1 && panel_state.speed == SPD_NEUTRAL){
+    btn_d->short_press = 1;
+    btn_a->ht = BTN_MILLS;
     panel_state.regen = !panel_state.regen;
   }
 }
