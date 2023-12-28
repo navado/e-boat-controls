@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
-#include "TimerInterrupt_Generic.h"
+
 
 #ifdef U8X8_HAVE_HW_SPI
 #include <SPI.h>
@@ -11,28 +11,6 @@
 
 /* ------------ PINOUT ---------------*/
 #pragma region PINOUT
-
-#if defined(BOARD_ARDUINO_NANO)
-#define CS_PIN 8
-#define RSE_PIN 7
-#define RS_PIN 6
-#define SCL_PIN 12 // to release 11 for PWM
-#define SDO_PIN 4
-#define SDI_PIN 10
-#define BACKLIGHT_PIN 11 // PWM
-#define LED_BRD_RD 13
-#define LED_BRD_GR 10
-
-#define RPM_PIN 5
-
-#define THROTTLE_IN A0
-#define THROTTLE_OUT 3 // PWM
-
-#define BTN_D A2
-#define BTN_C A3
-#define BTN_B A4
-#define BTN_A A5
-#elif defined(BOARD_BLUEPILL)
 
 
 #define CS_PIN PC14
@@ -53,7 +31,6 @@
 #define BTN_C PB7
 #define BTN_B PB8
 #define BTN_A PB9
-#endif
 
 #define BTN_PRESS_THRESHOLD 2
 #define BTN_LONG_PRESS_THRESHOLD 40
@@ -84,7 +61,6 @@ U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
 #pragma region Variables
 volatile uint8_t frames = 0;
 volatile uint8_t fps = 0;
-volatile uint16_t cnt, cnt_raw = 0, ticks = 0;
 
 
 #define THROTTLE_TABLE_SIZE 11
@@ -162,51 +138,6 @@ void update_buttons(){
   update_button_state(3, digitalRead(BTN_D));
 }
 
-void setup_rpm_counter(){
-  // pinMode(RPM_PIN, INPUT);
-  #if defined(BOARD_ARDUINO_NANO)
-  TCCR1A=0; // setup timer-1
-  TCCR1C=0;
-  TIMSK1=0;
-  GTCCR=0;
-  TCCR1B=0b00000110; // falling edge
-  #endif
-
-}
-
-void run_every_1s(){
-  #if defined(BOARD_ARDUINO_NANO)
-  cnt = TCNT1;
-  TCNT1=0;
-  #endif
-  panel_state.rpm = cnt;
-  cnt=0;
-}
-
-void run_every_100ms(){
-  // update_buttons();
-  throttle_in_value = analogRead(THROTTLE_IN);
-  ticks++;
-  cnt++;
-  if (ticks % 10 == 0){
-    run_every_1s();
-  }
-}
-
-#if defined(BOARD_ARDUINO_NANO)
-TimerInterrupt timer1(1);
-
-void setup_timing_functions(){
-  timer1.attachInterruptInterval(100, run_every_100ms);
-}
-#elif defined(BOARD_BLUEPILL)
-STM32TimerInterrupt timer1(TIM1);
-
-void setup_timing_functions(){
-  timer1.attachInterruptInterval(100000, run_every_100ms);
-}
-#endif
-
 void setup() {
   Serial.begin(115200);
   // Prepare keepalive LED
@@ -224,13 +155,6 @@ void setup() {
   lcd.setContrast(CONTRAST_SETTING);
   Serial.println("LCD Init Done");
 
-  // Prepare timings
-  setup_timing_functions();
-
-  // Throttle
-  pinMode(THROTTLE_IN, INPUT);
-  pinMode(THROTTLE_OUT, OUTPUT);
-  analogWrite(THROTTLE_OUT, throttle_table[panel_state.speed]);
 
   // Buttons
   pinMode(BTN_A, INPUT);
@@ -238,10 +162,7 @@ void setup() {
   pinMode(BTN_C, INPUT);
   pinMode(BTN_D, INPUT);
 
-  pinMode(RPM_PIN, INPUT_PULLUP);
-  attachInterrupt(RPM_PIN, [](){
-    cnt++;
-  }, CHANGE);
+
   attachInterrupt(BTN_A, [](){ // Throttle UP
     update_button_state(0, digitalRead(BTN_A));
   }, CHANGE);
@@ -255,8 +176,6 @@ void setup() {
     update_button_state(3, digitalRead(BTN_D));
   }, CHANGE);
   panel_state.speed = SPD_NEUTRAL;
-  // Timers/counters
-  setup_rpm_counter();
 }
 
 #pragma region UI
@@ -289,7 +208,6 @@ uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, const char * value){
 
 void printColumn1(){
   uint8_t _x=2, _y = 8;
-  _y = printKWLabel(_x, _y, "CNT: ", cnt);
   _y = printKWLabel(_x, _y, "T: ", millis()/1000);
   _y = printKWLabel(_x, _y, "PWR: ", btn_c->t);
 }
@@ -334,27 +252,6 @@ void draw_screen(){
   } while (lcd.nextPage());
 }
 #pragma endregion
-
-// typedef enum{
-//   RELEASED = 0,
-//   PRESSED = 1,
-//   LONG_PRESSED = 2,
-//   MAX_DURATION = 3,
-//   OTHER = 4
-// } button_state_t;
-
-// button_state_t get_button_state(uint8_t index){
-//   btn_state_t * btn = &buttons_state[index];
-//   if (btn->state == 0)
-//     return RELEASED;
-//   if (btn->count == BTN_PRESS_THRESHOLD)
-//     return PRESSED;
-//   if (btn->count == BTN_LONG_PRESS_THRESHOLD)
-//     return LONG_PRESSED;
-//   if (btn->count == BTN_MAX_DURATION)
-//     return MAX_DURATION;
-//   return OTHER;
-// }
 
 void handle_throttle(){
 
