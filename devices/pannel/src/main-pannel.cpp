@@ -99,18 +99,7 @@ btn_state_t * btn_c = &buttons_state[2];
 btn_state_t * btn_d = &buttons_state[3];
 
 
-
-volatile struct panel_state_ {
-  union{
-    struct{
-  uint8_t power: 1; // 0 - OFF, 1 - ON
-  uint8_t regen: 1; // 0 - OFF, 1 - ON
-    };
-    uint8_t mode:2;
-  };
-  uint8_t speed: 6; // 0 - 11 index in throttle_table
-  uint16_t rpm :16;
-} panel_state = {0};
+#include <models.h>
 #pragma endregion
 
 /* ------------ Functions ------------------*/
