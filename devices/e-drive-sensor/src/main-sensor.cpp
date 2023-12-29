@@ -2,16 +2,15 @@
 #include <TimeInterrupt.h>
 
 #include <pinout.h>
-#include <ui.h>
+// #include <ui.h>
 #include <buttons.h>
 #include <models.h>
 #include <comms.h>
 
 
 bool serial_sent = false;
-
 void setup_rpm_counter(){
-  pinMode(RPM_PIN, INPUT_PULLUP);
+  pinMode(RPM_PIN, INPUT);
   TCCR1A=0; // setup timer-1
   TCCR1C=0;
   TIMSK1=0;
@@ -28,6 +27,7 @@ void run_every_1s(){
 void run_every_100ms(){
   engine_state.throttle_val = analogRead(THROTTLE_IN);
   engine_state.vcc48v = analogRead(VCC_SENS_IN);
+  update_buttons();
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
 }
 
@@ -48,6 +48,7 @@ void set_state(){
 void setup() {
   Serial.begin(115200);
   analogReference(DEFAULT);
+  pinMode(LED_BRD, OUTPUT);
   // Throttle
   pinMode(THROTTLE_IN, INPUT);
   pinMode(THROTTLE_OUT, OUTPUT);
@@ -61,24 +62,32 @@ void setup() {
   pinMode(RELAY_REVERSE, OUTPUT);
   pinMode(RELAY_REGEN, OUTPUT);
   pinMode(RELAY_SPARE, OUTPUT);
-
+  // Buttons
+  setup_buttons();
+  // LCD
+  // setup_screen();
   set_state();
 }
 
 void loop() {
+  // digitalWrite(LED_BRD, !digitalRead(LED_BRD));
   if(serial_available()){
     read_serial_commands();
-    set_state();
   }
+  set_state();
   if (serial_sent) return;
   serial_sent = true;
-  // send_serial_field(&Serial, "t", String(millis()));
-  // send_serial_field(&Serial, "rpm", String(engine_state.rpm));
-  // send_serial_field(&Serial, "pow", engine_state.power?"on":"off");
-  // send_serial_field(&Serial, "rev", engine_state.reverse?"on":"off");
-  // send_serial_field(&Serial, "reg", engine_state.regen?"on":"off");
-  // send_serial_field(&Serial, "thr", String(engine_state.throttle));
-  // send_serial_field(&Serial, "vth", String(map(engine_state.throttle_val,0,1023,0,5000)));
-  // send_serial_field(&Serial, "vcc", String(map(engine_state.vcc48v,0,1023,0,100000)), true);
-  model_foo();
+  send_serial_field(&Serial, "t", String(millis()));
+  send_serial_field(&Serial, "rpm", String(engine_state.rpm));
+  send_serial_field(&Serial, "pow", bool_to_on_of(engine_state.power));
+  send_serial_field(&Serial, "rev", bool_to_on_of(engine_state.reverse));
+  send_serial_field(&Serial, "reg", bool_to_on_of(engine_state.regen));
+  send_serial_field(&Serial, "thr", String(engine_state.throttle));
+  send_serial_field(&Serial, "vth", String(map(engine_state.throttle_val,0,1023,0,5000)));
+  send_serial_field(&Serial, "vcc", String(map(engine_state.vcc48v,0,1023,0,100000)));
+  for (int i=0; i<4; i++){
+    send_serial_field(&Serial, String("btn")+String(i), String(bool_to_on_of(buttons_state[i].state)), i==3);
+  }
+
+  // draw_screen();
   }

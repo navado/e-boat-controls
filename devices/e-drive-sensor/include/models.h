@@ -44,5 +44,4 @@ extern const uint8_t throttle_table[];
 #define SPD_NEUTRAL 5
 
 void update_throttle_value(int val);
-void model_foo();
 #endif

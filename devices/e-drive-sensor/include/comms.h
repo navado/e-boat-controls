@@ -23,5 +23,5 @@ void send_serial_field(
 void send_serial_error(String msg);
 void read_serial_commands();
 inline bool serial_available(){return Serial.available();}
-
+String bool_to_on_of(bool value);
 #endif

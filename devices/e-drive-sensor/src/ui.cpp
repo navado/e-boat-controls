@@ -16,7 +16,14 @@
 uint8_t backlight_value = 255;
 uint8_t frames = 0;
 
-U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
+// U8G2_ST7565_ERC12864_ALT_F_4W_SW_SPI lcd(U8G2_R0,
+//                                         /* clock=*/SCL_PIN,
+//                                         /* data=*/SDO_PIN,
+//                                         /* cs=*/CS_PIN,
+//                                         /* dc=*/RS_PIN,
+//                                         /* reset=*/RST_PIN
+//                                         );
+U8G2_ST7565_ERC12864_ALT_2_4W_SW_SPI  lcd(U8G2_R0,
                                         /* clock=*/SCL_PIN,
                                         /* data=*/SDO_PIN,
                                         /* cs=*/CS_PIN,
@@ -95,4 +102,15 @@ void draw_screen(){
     printColumn2();
     printBigLabel();
   } while (lcd.nextPage());
+}
+
+void setup_screen(){
+  pinMode(BACKLIGHT_PIN, OUTPUT);
+  analogWrite(BACKLIGHT_PIN, backlight_value);
+  
+  lcd.begin();
+  lcd.setFont(u8g2_font_5x8_tf);
+
+  lcd.setContrast(CONTRAST_SETTING);
+  Serial.println("LCD Init Done");
 }

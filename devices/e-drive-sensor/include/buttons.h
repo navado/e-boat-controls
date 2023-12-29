@@ -43,4 +43,5 @@ extern btn_state_t * btn_d;
 
 void update_button_state(uint8_t index, uint8_t value);
 void update_buttons();
+void setup_buttons();
 #endif

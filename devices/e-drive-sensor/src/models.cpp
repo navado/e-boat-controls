@@ -14,7 +14,3 @@ void update_throttle_value(int val){
   }
   engine_state.throttle = (uint8_t)val;
 }
-
-void model_foo(){
-  engine_state.rpm = 1110;
-}

@@ -39,6 +39,10 @@ on_off_t parse_on_off(String val){
   return error;
 }
 
+String bool_to_on_of(bool value){
+  return value?"on":"off";
+}
+
 void send_serial_error(String msg){
   Serial.print("ERROR: ");
   Serial.println(msg);
@@ -48,19 +52,17 @@ void send_serial_error(String msg){
 void handle_command(String token){
   String tok[4];
   uint8_t num_tokens = tokenize(token, ':', tok, 4);
-  Serial.println(token);
-  for (uint8_t i=0; i<num_tokens; i++){
-    Serial.print(tok[i]);
-    Serial.print("|");
+  if(num_tokens != 2){
+    send_serial_error("wrong comand format");
+    return;
   }
-  Serial.println();
   cmd_t cmd = parse_cmd(tok[0]);
   on_off_t val = parse_on_off(tok[1]);
   int tv = 0;
   switch(cmd){
     case CMD_POWER:
       if(engine_state.power && engine_state.throttle > 1){
-        Serial.println("ERROR: Cannot force power off when engine is running");
+       send_serial_error("Cannot force power off when engine is running");
         break;
       }
       UPDATE_ON_OFF_FIELD(power, val);
@@ -68,10 +70,10 @@ void handle_command(String token){
     case CMD_REVERSE:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        Serial.println("ERROR: Cannot force reverse when engine is running");
+        send_serial_error("Cannot force reverse when engine is running");
         break;
       } else if(engine_state.regen){
-        Serial.println("ERROR: Cannot force reverse when regen is on");
+        send_serial_error("Cannot force reverse when regen is on");
         break;
       }
       UPDATE_ON_OFF_FIELD(reverse, val);
@@ -79,21 +81,21 @@ void handle_command(String token){
     case CMD_REGEN:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        Serial.println("ERROR: Cannot force regen when engine is running");
+        send_serial_error("Cannot force regen when engine is running");
         break;
       } else if(engine_state.reverse){
-        Serial.println("ERROR: Cannot force regen when reverse is on");
+        send_serial_error("Cannot force regen when reverse is on");
         break;
       }
       UPDATE_ON_OFF_FIELD(regen, val);
       break;
     case CMD_THROTTLE:
       if(engine_state.power==0){
-        Serial.println("ERROR: Cannot set throttle when engine is off");
+        send_serial_error("annot set throttle when engine is off");
         break;
       }
       if(engine_state.regen){
-        Serial.println("ERROR: Cannot set throttle when regen is on");
+        send_serial_error("Cannot set throttle when regen is on");
         break;
       }
       tv = tok[1].toInt();
