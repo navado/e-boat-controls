@@ -2,7 +2,6 @@
 #include <TimeInterrupt.h>
 
 #include <pinout.h>
-// #include <ui.h>
 #include <buttons.h>
 #include <models.h>
 #include <comms.h>
@@ -38,6 +37,8 @@ void setup_timing_functions(){
 }
 
 void set_state(){
+  // TODO: implement guards for reverse and regen, not to switch them while throttle is actually powered
+
   digitalWrite(RELAY_LOCK, engine_state.power);
   digitalWrite(RELAY_REVERSE, engine_state.reverse);
   digitalWrite(RELAY_REGEN, engine_state.regen);

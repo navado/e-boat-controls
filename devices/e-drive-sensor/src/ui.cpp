@@ -112,5 +112,5 @@ void setup_screen(){
   lcd.setFont(u8g2_font_5x8_tf);
 
   lcd.setContrast(CONTRAST_SETTING);
-  Serial.println("LCD Init Done");
-}
+  printSmiley(64, 32, 30);
+  }
