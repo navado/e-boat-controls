@@ -2,11 +2,8 @@
 #include "comms.h"
 #include "models.h"
 
-#define MAX_TOKENS 16
-String tokens[MAX_TOKENS];
 
-
-uint8_t tokenize(String msg, char delim = ',', String * tok = tokens,uint8_t max_tok = MAX_TOKENS){
+uint8_t tokenize(String msg, char delim , String * tok,uint8_t max_tok){
   uint8_t i = 0;
   uint8_t j = 0;
   uint8_t len = msg.length();
@@ -33,19 +30,15 @@ cmd_t parse_cmd(String cmd){
   return CMD_UNKNOWN;
 }
 
-on_off_t parse_on_off(String val){
-  if(val == "on") return on;
-  if(val == "off") return off;
-  return error;
-}
-
 String bool_to_on_of(bool value){
   return value?"on":"off";
 }
 
 void send_serial_error(String msg){
+  #if defined(DEBUG)
   Serial.print("ERROR: ");
   Serial.println(msg);
+  #endif
 }
 
 
@@ -91,7 +84,7 @@ void handle_command(String token){
       break;
     case CMD_THROTTLE:
       if(engine_state.power==0){
-        send_serial_error("annot set throttle when engine is off");
+        send_serial_error("Cannot set throttle when engine is off");
         break;
       }
       if(engine_state.regen){
@@ -99,8 +92,6 @@ void handle_command(String token){
         break;
       }
       tv = tok[1].toInt();
-      Serial.print("Throttle value: ");
-      Serial.println(tv);
       update_throttle_value(tv);
       break;
     case CMD_RESET:
@@ -111,8 +102,11 @@ void handle_command(String token){
       break;
     case CMD_UNKNOWN:
     default:
+  #if defined(DEBUG)
       Serial.print("WARNING: Command not supported: ");
       Serial.println(tokens[0]);
+  #endif
+    delay(1); // Do nothing but to compile correctly w/o DEBUG
   }
 }
 
@@ -130,9 +124,22 @@ void send_serial_field(
   else p->print(delim);
 }
 
+String tokens[MAX_TOKENS];
 void read_serial_commands(){
-  uint8_t num_tokens = tokenize(Serial.readStringUntil('\n'),',');
+
+  uint8_t num_tokens = tokenize(Serial.readStringUntil('\n'),',',tokens,MAX_TOKENS);
+  Serial.print(num_tokens);
+  Serial.print("Tokens: ");
   for(uint8_t i=0; i< num_tokens; i++){
-    handle_command(tokens[i]);
+    Serial.print(tokens[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+  if(num_tokens == 0) return;
+  if(tokens[0] == "cmd"){
+    Serial.println("OK");
+    for(uint8_t i=1; i< num_tokens; i++){
+      handle_command(tokens[i]);
+    }
   }
 }

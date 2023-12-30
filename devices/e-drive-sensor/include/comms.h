@@ -24,4 +24,8 @@ void send_serial_error(String msg);
 void read_serial_commands();
 inline bool serial_available(){return Serial.available();}
 String bool_to_on_of(bool value);
+
+#define MAX_TOKENS 16
+uint8_t tokenize(String msg, char delim, String * tok, uint8_t max_tok = MAX_TOKENS);
+
 #endif

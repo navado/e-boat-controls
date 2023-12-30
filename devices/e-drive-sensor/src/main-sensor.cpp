@@ -78,17 +78,14 @@ void loop() {
   set_state();
   if (serial_sent) return;
   serial_sent = true;
-  send_serial_field(&Serial, "t", String(millis()));
+  send_serial_field(&Serial, "T", String(millis()));
   send_serial_field(&Serial, "rpm", String(engine_state.rpm));
   send_serial_field(&Serial, "pow", bool_to_on_of(engine_state.power));
   send_serial_field(&Serial, "rev", bool_to_on_of(engine_state.reverse));
   send_serial_field(&Serial, "reg", bool_to_on_of(engine_state.regen));
   send_serial_field(&Serial, "thr", String(engine_state.throttle));
   send_serial_field(&Serial, "vth", String(map(engine_state.throttle_val,0,1023,0,5000)));
-  send_serial_field(&Serial, "vcc", String(map(engine_state.vcc48v,0,1023,0,100000)));
-  for (int i=0; i<4; i++){
-    send_serial_field(&Serial, String("btn")+String(i), String(bool_to_on_of(buttons_state[i].state)), i==3);
-  }
+  send_serial_field(&Serial, "vcc", String(map(engine_state.vcc48v,0,1023,0,100000)), true);
 
   // draw_screen();
   }

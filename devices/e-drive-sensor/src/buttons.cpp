@@ -40,7 +40,7 @@ void setup_buttons(){
   pinMode(BTN_C, INPUT);
   pinMode(BTN_D, INPUT);
 
-
+#if defined(PANNEL_STM32)
   attachInterrupt(BTN_A, [](){ // Throttle UP
     update_button_state(0, digitalRead(BTN_A));
   }, CHANGE);
@@ -53,4 +53,5 @@ void setup_buttons(){
   attachInterrupt(BTN_D, [](){ // REGEN
     update_button_state(3, digitalRead(BTN_D));
   }, CHANGE);
+  #endif
 }

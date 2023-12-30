@@ -3,7 +3,13 @@
 #include <pinout.h>
 #include <models.h>
 #include <buttons.h>
+#include <comms.h>
+#include <TimeInterrupt.h>
 
+void run_every_1s(){}
+void run_every_100ms(){
+  update_buttons();
+}
 void setup() {
   Serial.begin(115200);
   // Prepare keepalive LED
@@ -11,6 +17,9 @@ void setup() {
   digitalWrite(LED_BRD, HIGH);
   setup_buttons();
   setup_screen();
+  TimeInterrupt.begin(PRECISION);
+  TimeInterrupt.addInterrupt(run_every_100ms,100);
+  TimeInterrupt.addInterrupt(run_every_1s,1000);
 }
 
 
@@ -77,10 +86,57 @@ void handle_state(){
   }
 }
 
+void serial_loopback(){
+  if (Serial.available()){
+    char c = Serial.read();
+    if(c==',') c = '|';
+    if(c==':') c = '-';
+    Serial.write(c);
+  }
+}
+
+void parse_serial_data(){
+  if (Serial.available()){
+    String data = Serial.readStringUntil('\n');
+    String parsed[MAX_TOKENS];
+    uint8_t num_tokens = tokenize(data, ',', parsed, MAX_TOKENS);
+    if(num_tokens == 0) return;
+    for (size_t i = 0; i < num_tokens; i++)
+    {
+      String tok[4];
+      uint8_t num_tok = tokenize(parsed[i], ':', tok, 4);
+      if(num_tok == 0) continue;
+      if(i==0 && tok[0]!="T") continue; // not the right message
+      if(tok[0]=="T") engine_state.T = tok[1].toInt();
+      // t:132625,rpm:0,pow:off,rev:off,reg:off,thr:0,vth:0,vcc:0,btn0:off,btn1:off,btn2:off,btn3:on
+      if(tok[0]=="rpm") engine_state.rpm = tok[1].toInt();
+      if(tok[0]=="pow") UPDATE_ON_OFF_FIELD(power, parse_on_off(tok[1]));
+      if(tok[0]=="rev") UPDATE_ON_OFF_FIELD(reverse, parse_on_off(tok[1]));
+      if(tok[0]=="reg") UPDATE_ON_OFF_FIELD(regen, parse_on_off(tok[1]));
+      if(tok[0]=="thr") engine_state.throttle = tok[1].toInt();
+      if(tok[0]=="vth") engine_state.throttle_val = tok[1].toInt();
+      if(tok[0]=="vcc") engine_state.vcc48v = tok[1].toInt();
+    }
+  }
+}
+
+void send_state(){
+  Serial.print("cmd,");
+  send_serial_field(&Serial, "pow", bool_to_on_of(panel_state.power));
+  send_serial_field(&Serial, "rev", bool_to_on_of(panel_state.speed < SPD_NEUTRAL));
+  send_serial_field(&Serial, "reg", bool_to_on_of(panel_state.regen));
+  send_serial_field(&Serial, "thr", String(throttle_table[panel_state.speed]), true);
+}
+
 void loop()
 {
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
+  parse_serial_data();
+  panel_state_t old_state={0};
+  memccpy(&old_state, &panel_state, 0, sizeof(panel_state_t));
   handle_throttle();
   handle_state();
   draw_screen();
+  if(memcmp(&old_state, &panel_state, sizeof(panel_state_t))!=0)
+    send_state();
 }

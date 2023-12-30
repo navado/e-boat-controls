@@ -14,3 +14,10 @@ void update_throttle_value(int val){
   }
   engine_state.throttle = (uint8_t)val;
 }
+
+
+on_off_t parse_on_off(String val){
+  if(val == "on") return on;
+  if(val == "off") return off;
+  return error;
+}

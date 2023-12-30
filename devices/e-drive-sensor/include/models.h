@@ -1,7 +1,7 @@
 #ifndef MODELS_H
 #define MODELS_H
 
-#include <stdint.h>
+#include <Arduino.h>
 
 typedef struct panel_state_ {
   union{
@@ -26,6 +26,7 @@ typedef struct {
   uint16_t throttle_val;    // As read from ADC
   uint16_t vcc48v;          // Batery voltage
   uint16_t rpm;             // RPM
+  unsigned long T;          // Timestamp
 } engine_state_t;
 extern volatile engine_state_t engine_state;
 
@@ -34,7 +35,7 @@ typedef enum {
   on = 1,
   error = 2
 } on_off_t;
-
+on_off_t parse_on_off(String val);
 #define UPDATE_ON_OFF_FIELD(f,v) if(v!=on_off_t::error) engine_state.f = v;
 
 

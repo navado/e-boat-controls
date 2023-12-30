@@ -60,16 +60,23 @@ uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, const char * value){
 
 void printColumn1(){
   uint8_t _x=2, _y = 8;
-  _y = printKWLabel(_x, _y, "T: ", millis()/1000);
-  _y = printKWLabel(_x, _y, "PWR: ", btn_c->t);
+  _y = printKWLabel(_x, _y, "ENT: ", engine_state.T/1000);
+  _y = printKWLabel(_x, _y, "PWR: ", engine_state.power);
+  _y = printKWLabel(_x, _y, "REV: ", engine_state.reverse);
+  _y = printKWLabel(_x, _y, "RGN: ", engine_state.regen);
+
 }
 
 
 void printColumn2(){
   uint8_t _x=64, _y = 8;
-  _y = printKWLabel(_x, _y, "T/I: ", panel_state.speed);
-  _y = printKWLabel(_x, _y, "T/O: ", throttle_table[panel_state.speed]);
-  _y = printKWLabel(_x, _y, "T/V: ", map(engine_state.throttle_val, 0, 1023, 0, 500));
+  _y = printKWLabel(_x, _y, "PAT: ", millis()/1000);
+  _y = printKWLabel(_x, _y, "POW: ", panel_state.power);
+  char _buf[16];
+  sprintf(_buf, "%d:%d", panel_state.speed, throttle_table[panel_state.speed]);
+  _y = printKWLabel(_x, _y, "THR: ", (const char *)_buf);
+  _y = printKWLabel(_x, _y, "REG: ", panel_state.regen);
+
 }
 
 void printSmileyFont(uint8_t index){
@@ -81,14 +88,13 @@ void printSmileyFont(uint8_t index){
 void printBigLabel(){
   lcd.setFont(u8g2_font_inb30_mr);
   lcd.setCursor(0, 63);
-  if(panel_state.mode == 0){
+  if(engine_state.power == 0){
     lcd.print("OFF");
-  } else if (panel_state.regen == 1){
+  } else if (engine_state.regen == 1){
     lcd.print("REGEN");
   } else {
     lcd.print(panel_state.speed==SPD_NEUTRAL?"N":(panel_state.speed < SPD_NEUTRAL?"R":"F"));
-    // lcd.print(panel_state.rpm);
-    lcd.print(9999);
+    lcd.print(engine_state.rpm);
   }
 }
 
