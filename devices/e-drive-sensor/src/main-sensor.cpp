@@ -68,6 +68,8 @@ void setup() {
   // LCD
   // setup_screen();
   set_state();
+  char msg[] = "ENINF,st:STARTED";
+  send_msg(&Serial, msg);
 }
 
 void loop() {
@@ -78,14 +80,17 @@ void loop() {
   set_state();
   if (serial_sent) return;
   serial_sent = true;
-  send_serial_field(&Serial, "T", String(millis()));
-  send_serial_field(&Serial, "rpm", String(engine_state.rpm));
-  send_serial_field(&Serial, "pow", bool_to_on_of(engine_state.power));
-  send_serial_field(&Serial, "rev", bool_to_on_of(engine_state.reverse));
-  send_serial_field(&Serial, "reg", bool_to_on_of(engine_state.regen));
-  send_serial_field(&Serial, "thr", String(engine_state.throttle));
-  send_serial_field(&Serial, "vth", String(map(engine_state.throttle_val,0,1023,0,5000)));
-  send_serial_field(&Serial, "vcc", String(map(engine_state.vcc48v,0,1023,0,100000)), true);
+  char msg[128];
+  sprintf(msg, "ENINF,T:%lu,rpm:%d,pow:%s,rev:%s,reg:%s,thr:%d,vth:%lu,vcc:%lu",
+    millis(),
+    engine_state.rpm,
+    bool_to_on_of(engine_state.power).c_str(),
+    bool_to_on_of(engine_state.reverse).c_str(),
+    bool_to_on_of(engine_state.regen).c_str(),
+    engine_state.throttle,
+    map(engine_state.throttle_val,0,1023,0,5000),
+    map(engine_state.vcc48v,0,1023,0,100000)
+  );
+  send_msg(&Serial, msg);
+}
 
-  // draw_screen();
-  }

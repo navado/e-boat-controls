@@ -136,10 +136,29 @@ void read_serial_commands(){
   }
   Serial.println();
   if(num_tokens == 0) return;
-  if(tokens[0] == "cmd"){
-    Serial.println("OK");
+  if(tokens[0] == "$ENCMD"){
+    char _msg[] = "ENACK,st:OK";
+    send_msg(&Serial,_msg);
     for(uint8_t i=1; i< num_tokens; i++){
       handle_command(tokens[i]);
     }
   }
+}
+
+void send_msg(Print * p, const char * msg){
+  char checksum = msg_checksum(msg);
+  p->print("$");
+  p->print(msg);
+  p->print("*");
+  p->println(checksum, HEX);
+}
+
+
+char msg_checksum(const char * msg, char initial, int len)
+{
+  if(len == 0) len = strlen(msg);
+  for(int i=0; i<len; i++){
+    initial ^= msg[i];
+  }
+  return initial;
 }

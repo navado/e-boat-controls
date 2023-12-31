@@ -27,5 +27,6 @@ String bool_to_on_of(bool value);
 
 #define MAX_TOKENS 16
 uint8_t tokenize(String msg, char delim, String * tok, uint8_t max_tok = MAX_TOKENS);
-
+char msg_checksum(const char * msg, char initial = 0, int len = 0);
+void send_msg(Print * p, const char * msg);
 #endif
