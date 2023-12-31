@@ -29,4 +29,7 @@ String bool_to_on_of(bool value);
 uint8_t tokenize(String msg, char delim, String * tok, uint8_t max_tok = MAX_TOKENS);
 char msg_checksum(const char * msg, char initial = 0, int len = 0);
 void send_msg(Print * p, const char * msg);
+cmd_t parse_cmd(String cmd);
+bool handle_command(String token);
+void read_engine_commands(bool (*handle_cmd)(String token));
 #endif

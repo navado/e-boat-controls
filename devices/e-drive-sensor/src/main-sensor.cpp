@@ -72,10 +72,78 @@ void setup() {
   send_msg(&Serial, msg);
 }
 
+
+bool handle_command(String token){
+  String tok[4];
+  uint8_t num_tokens = tokenize(token, ':', tok, 4);
+  if(num_tokens != 2){
+    return false;
+  }
+  cmd_t cmd = parse_cmd(tok[0]);
+  on_off_t val = parse_on_off(tok[1]);
+  int tv = 0;
+  switch(cmd){
+    case CMD_POWER:
+      if(engine_state.power && engine_state.throttle > 1){
+       send_serial_error("Cannot force power off when engine is running");
+       break;
+      }
+      UPDATE_ON_OFF_FIELD(power, val);
+      break;
+    case CMD_REVERSE:
+      if(engine_state.power==0) break;
+      if(engine_state.throttle > 1){
+        send_serial_error("Cannot force reverse when engine is running");
+        break;
+      } else if(engine_state.regen){
+        send_serial_error("Cannot force reverse when regen is on");
+        break;
+      }
+      UPDATE_ON_OFF_FIELD(reverse, val);
+      break;
+    case CMD_REGEN:
+      if(engine_state.power==0) break;
+      if(engine_state.throttle > 1){
+        send_serial_error("Cannot force regen when engine is running");
+        break;
+      } else if(engine_state.reverse){
+        send_serial_error("Cannot force regen when reverse is on");
+        break;
+      }
+      UPDATE_ON_OFF_FIELD(regen, val);
+      break;
+    case CMD_THROTTLE:
+      if(engine_state.power==0){
+        send_serial_error("Cannot set throttle when engine is off");
+        break;
+      }
+      if(engine_state.regen){
+        send_serial_error("Cannot set throttle when regen is on");
+        break;
+      }
+      tv = tok[1].toInt();
+      update_throttle_value(tv);
+      break;
+    case CMD_RESET:
+      engine_state.power = 1;
+      engine_state.reverse = 0;
+      engine_state.regen = 0;
+      engine_state.throttle = 0;
+      break;
+    case CMD_UNKNOWN:
+    default:
+  #if defined(DEBUG)
+      Serial.print("WARNING: Command not supported: ");
+      Serial.println(tokens[0]);
+  #endif
+    return false;
+  }
+  return true;
+}
+
 void loop() {
-  // digitalWrite(LED_BRD, !digitalRead(LED_BRD));
   if(serial_available()){
-    read_serial_commands();
+    read_engine_commands(handle_command);
   }
   set_state();
   if (serial_sent) return;
