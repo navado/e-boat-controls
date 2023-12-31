@@ -42,18 +42,27 @@ void printSmiley(uint8_t x, uint8_t y, uint8_t r){
   lcd.drawDisc(x+_eye_spacing, _eye_level, _eye_size);  // right eye
 }
 
-uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key,  uint32_t value){
+void printKWlabelKey(uint8_t x, uint8_t y, const char *key)
+{
   lcd.setFont(u8g2_font_5x8_tf);
   lcd.setCursor(x, y);
   lcd.print(key);
+}
+
+uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key,  uint32_t value){
+  printKWlabelKey(x, y, key);
   lcd.print(value);
   return y+8;
 }
 
 uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, const char * value){
-  lcd.setFont(u8g2_font_5x8_tf);
-  lcd.setCursor(x, y);
-  lcd.print(key);
+  printKWlabelKey(x, y, key);
+  lcd.print(value);
+  return y+8;
+}
+
+uint8_t printKWLabel(uint8_t x, uint8_t y, const char* key, String value){
+  printKWlabelKey(x, y, key);
   lcd.print(value);
   return y+8;
 }
@@ -105,7 +114,8 @@ void draw_screen(){
   do
   {
     printColumn1();
-    printColumn2();
+    // printColumn2();
+    display_serial_data();
     printBigLabel();
   } while (lcd.nextPage());
 }

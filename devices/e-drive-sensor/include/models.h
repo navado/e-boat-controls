@@ -11,17 +11,21 @@ typedef struct panel_state_ {
     };
     uint8_t mode:2;
   };
-  uint8_t speed: 6; // 0 - 11 index in throttle_table
+  uint8_t changed: 1;
+  uint8_t spare: 1;
+  uint8_t speed: 4; // 0 - 11 index in throttle_table
   uint16_t rpm :16;
 } panel_state_t;
 
 extern volatile panel_state_t panel_state;
+#define PANEL_STATE_SET_CHANGED() panel_state.changed = 1;
 
 typedef struct {
   uint8_t power:1;          // 0 - OFF, 1 - ON
   uint8_t reverse:1;        // 0 - OFF, 1 - ON
   uint8_t regen: 1;         // 0 - OFF, 1 - ON
-  uint8_t spare: 6;
+  uint8_t changed: 1;
+  uint8_t spare: 5;
   uint8_t throttle: 8;      // For analogWrite
   uint16_t throttle_val;    // As read from ADC
   uint16_t vcc48v;          // Batery voltage

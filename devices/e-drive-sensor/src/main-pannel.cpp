@@ -35,6 +35,7 @@ void handle_throttle(){
     btn_a->short_press = 1;
     btn_a->ht = BTN_MILLS;
     panel_state.speed = min(panel_state.speed + 1, THROTTLE_TABLE_SIZE - 1);
+    PANEL_STATE_SET_CHANGED();
   }
 
   if(BTN_LONG_PRESS(btn_a) && btn_a->long_press == 0){
@@ -47,12 +48,14 @@ void handle_throttle(){
     } else { // Reverse to Neutral
       panel_state.speed = SPD_NEUTRAL;
     }
+    PANEL_STATE_SET_CHANGED();
   }
 
   if (BTN_PRESS(btn_b) && btn_b->short_press == 0){
     btn_b->short_press = 1;
     btn_a->ht = BTN_MILLS;
     panel_state.speed = max(panel_state.speed - 1, 0);
+    PANEL_STATE_SET_CHANGED();
   }
 
   if (BTN_LONG_PRESS(btn_b) && btn_b->long_press == 0){
@@ -65,6 +68,7 @@ void handle_throttle(){
     } else { // Reverse to faster
       panel_state.speed = 0;
     }
+    PANEL_STATE_SET_CHANGED();
   }
 }
 
@@ -78,11 +82,13 @@ void handle_state(){
     if (panel_state.power == 0){
       panel_state.speed = SPD_NEUTRAL;
     }
+    PANEL_STATE_SET_CHANGED();
   }
   if (BTN_PRESS(btn_d) && btn_d->short_press ==0 && panel_state.power == 1 && panel_state.speed == SPD_NEUTRAL){
     btn_d->short_press = 1;
     btn_a->ht = BTN_MILLS;
     panel_state.regen = !panel_state.regen;
+    PANEL_STATE_SET_CHANGED();
   }
 }
 
@@ -94,49 +100,80 @@ void serial_loopback(){
     Serial.write(c);
   }
 }
-
+int msg_start;
+int msg_end;
+int len;
+String str_checksum;
+uint8_t checksum;
+void display_serial_data(){
+  uint8_t _x=64, _y = 8;
+  _y = printKWLabel(_x, _y, "st: ", msg_start);
+  _y = printKWLabel(_x, _y, "en: ", msg_end);
+  _y = printKWLabel(_x, _y, "le: ", len);
+  _y = printKWLabel(_x, _y, "sc: ", str_checksum);
+  _y = printKWLabel(_x, _y, "ck: ", checksum);
+}
 void parse_serial_data(){
   if (Serial.available()){
     String data = Serial.readStringUntil('\n');
-    String parsed[MAX_TOKENS];
-    uint8_t num_tokens = tokenize(data, ',', parsed, MAX_TOKENS);
-    if(num_tokens == 0) return;
-    for (size_t i = 0; i < num_tokens; i++)
-    {
-      String tok[4];
-      uint8_t num_tok = tokenize(parsed[i], ':', tok, 4);
-      if(num_tok == 0) continue;
-      if(i==0 && tok[0]!="T") continue; // not the right message
-      if(tok[0]=="T") engine_state.T = tok[1].toInt();
-      // t:132625,rpm:0,pow:off,rev:off,reg:off,thr:0,vth:0,vcc:0,btn0:off,btn1:off,btn2:off,btn3:on
-      if(tok[0]=="rpm") engine_state.rpm = tok[1].toInt();
-      if(tok[0]=="pow") UPDATE_ON_OFF_FIELD(power, parse_on_off(tok[1]));
-      if(tok[0]=="rev") UPDATE_ON_OFF_FIELD(reverse, parse_on_off(tok[1]));
-      if(tok[0]=="reg") UPDATE_ON_OFF_FIELD(regen, parse_on_off(tok[1]));
-      if(tok[0]=="thr") engine_state.throttle = tok[1].toInt();
-      if(tok[0]=="vth") engine_state.throttle_val = tok[1].toInt();
-      if(tok[0]=="vcc") engine_state.vcc48v = tok[1].toInt();
+    len = data.length();
+    msg_start = data.indexOf('$');
+    msg_end = data.indexOf('*');
+    String msg = data.substring(msg_start, msg_end);
+    str_checksum = data.substring(msg_end+1, data.length());
+    checksum = msg_checksum(msg.c_str());
+    long str_checksum_val = strtol(str_checksum.c_str(), NULL, 16);
+    if(checksum != str_checksum_val){
+      #if LOG_LEVEL==DEBUG
+       char _msg[128];
+      sprintf(_msg, "Checksum missmatch: %02X != %02X", checksum, (char)str_checksum_val);
+      send_serial_dbg(_msg,ERROR);
+      #endif
     }
+    String parsed[MAX_TOKENS];
+    uint8_t num_tokens = tokenize(msg, ',', parsed, MAX_TOKENS);
+    if(num_tokens == 0) return;
+    if(parsed[0] != "ENINF") return;
+    
+    // ENINF,T,POW,REV,REG,THR,VTH,VCC
+
+    engine_state.T = parsed[1].toInt();
+    engine_state.rpm = parsed[2].toInt();
+    engine_state.power = parsed[3].toInt();
+    engine_state.reverse = parsed[4].toInt();
+    engine_state.regen = parsed[5].toInt();
+    engine_state.throttle = parsed[6].toInt();
+    engine_state.throttle_val = parsed[7].toInt();
+    engine_state.vcc48v = parsed[8].toInt();
+    engine_state.changed = 1;
+    Serial.print("$ENDBG,len:");
+    Serial.print(msg.length());
+    Serial.print(",rxc:");
+    Serial.print(str_checksum);
+    Serial.print(",c:");
+    Serial.println(checksum, HEX);
   }
 }
 
 void send_state(){
-  Serial.print("cmd,");
-  send_serial_field(&Serial, "pow", bool_to_on_of(panel_state.power));
-  send_serial_field(&Serial, "rev", bool_to_on_of(panel_state.speed < SPD_NEUTRAL));
-  send_serial_field(&Serial, "reg", bool_to_on_of(panel_state.regen));
-  send_serial_field(&Serial, "thr", String(throttle_table[panel_state.speed]), true);
+  char _msg[128];
+  sprintf(_msg,"ENCMD,pow:%s,rev:%s,reg:%s,thr:%d",
+    bool_to_on_of(panel_state.power).c_str(),
+    bool_to_on_of(panel_state.speed < SPD_NEUTRAL).c_str(),
+    bool_to_on_of(panel_state.regen).c_str(),
+    throttle_table[panel_state.speed]
+  );
+  send_msg(&Serial, _msg);
+  panel_state.changed = 0;
 }
 
 void loop()
 {
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
   parse_serial_data();
-  panel_state_t old_state={0};
-  memccpy(&old_state, &panel_state, 0, sizeof(panel_state_t));
   handle_throttle();
   handle_state();
   draw_screen();
-  if(memcmp(&old_state, &panel_state, sizeof(panel_state_t))!=0)
+  if(panel_state.changed)
     send_state();
 }

@@ -20,7 +20,6 @@ void setup_rpm_counter(){
 void run_every_1s(){
   engine_state.rpm = TCNT1; // TODO: Need to divide by 6 (6 pulses per revolution) or find correct prescaler
   TCNT1=0;
-  serial_sent = false;
 }
 
 void run_every_100ms(){
@@ -30,10 +29,15 @@ void run_every_100ms(){
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
 }
 
+void run_every_10s(){
+    serial_sent = false;
+}
+
 void setup_timing_functions(){
   TimeInterrupt.begin(PRECISION);
   TimeInterrupt.addInterrupt(run_every_100ms,100);
   TimeInterrupt.addInterrupt(run_every_1s,1000);
+  TimeInterrupt.addInterrupt(run_every_10s,10*1000);
 }
 
 void set_state(){
@@ -85,7 +89,7 @@ bool handle_command(String token){
   switch(cmd){
     case CMD_POWER:
       if(engine_state.power && engine_state.throttle > 1){
-       send_serial_error("Cannot force power off when engine is running");
+       send_serial_dbg("Cannot force power off when engine is running", WARN);
        break;
       }
       UPDATE_ON_OFF_FIELD(power, val);
@@ -93,10 +97,10 @@ bool handle_command(String token){
     case CMD_REVERSE:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        send_serial_error("Cannot force reverse when engine is running");
+        send_serial_dbg("Cannot force reverse when engine is running", WARN);
         break;
       } else if(engine_state.regen){
-        send_serial_error("Cannot force reverse when regen is on");
+        send_serial_dbg("Cannot force reverse when regen is on",  WARN);
         break;
       }
       UPDATE_ON_OFF_FIELD(reverse, val);
@@ -104,21 +108,21 @@ bool handle_command(String token){
     case CMD_REGEN:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        send_serial_error("Cannot force regen when engine is running");
+        send_serial_dbg("Cannot force regen when engine is running", WARN);
         break;
       } else if(engine_state.reverse){
-        send_serial_error("Cannot force regen when reverse is on");
+        send_serial_dbg("Cannot force regen when reverse is on", WARN);
         break;
       }
       UPDATE_ON_OFF_FIELD(regen, val);
       break;
     case CMD_THROTTLE:
       if(engine_state.power==0){
-        send_serial_error("Cannot set throttle when engine is off");
+        send_serial_dbg("Cannot set throttle when engine is off", WARN);
         break;
       }
       if(engine_state.regen){
-        send_serial_error("Cannot set throttle when regen is on");
+        send_serial_dbg("Cannot set throttle when regen is on", WARN);
         break;
       }
       tv = tok[1].toInt();
@@ -147,18 +151,25 @@ void loop() {
   }
   set_state();
   if (serial_sent) return;
+
+  
   serial_sent = true;
   char msg[128];
-  sprintf(msg, "ENINF,T:%lu,rpm:%d,pow:%s,rev:%s,reg:%s,thr:%d,vth:%lu,vcc:%lu",
+  // ENINF,T,POW,REV,REG,THR,VTH,VCC,RESERVED
+  sprintf(msg, "ENINF,%lu,%d,%u,%u,%u,%d,%d,%ld,0",
     millis(),
     engine_state.rpm,
-    bool_to_on_of(engine_state.power).c_str(),
-    bool_to_on_of(engine_state.reverse).c_str(),
-    bool_to_on_of(engine_state.regen).c_str(),
+    engine_state.power,
+    engine_state.reverse,
+    engine_state.regen,
     engine_state.throttle,
     map(engine_state.throttle_val,0,1023,0,5000),
     map(engine_state.vcc48v,0,1023,0,100000)
   );
+    while (Serial.available())
+  {
+    Serial.read();
+  }
   send_msg(&Serial, msg);
 }
 

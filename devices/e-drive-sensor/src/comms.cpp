@@ -25,9 +25,13 @@ String bool_to_on_of(bool value){
   return value?"on":"off";
 }
 
-void send_serial_error(String msg){
-  #if defined(DEBUG)
-    String _msg = "ENDBG," + msg;
+
+const char * log_level_str[5] = {"DEBUG","INFO","WARN","ERROR","NONE"};
+
+void send_serial_dbg(String msg,log_level_t level){
+  #if (LOG_LEVEL==DEBUG || LOG_LEVEL==INFO || LOG_LEVEL==WARN || LOG_LEVEL==ERROR)
+    char _msg[128];
+    sprintf(_msg, "ENDBG,lvl:%s,msg:%s",log_level_str[level], msg.c_str());
     send_msg(&Serial, _msg);
   #endif
 }
@@ -51,7 +55,11 @@ void send_serial_field(
 void send_msg(Print * p, const char * msg){
   char checksum = msg_checksum(msg);
   p->print("$");
-  p->print(msg);
+  // write to print in chunks of 32 bytes
+  for(size_t i=0; i<strlen(msg); i+=32){
+    p->write(msg+i, min(32,strlen(msg)-i));
+    delay(2);
+  } 
   p->print("*");
   p->println(checksum, HEX);
 }

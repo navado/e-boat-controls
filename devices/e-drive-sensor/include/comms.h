@@ -20,7 +20,15 @@ void send_serial_field(
     String delim = ",",
     String f_delim = ":");
 
-void send_serial_error(String msg);
+typedef enum{
+  DEBUG,
+  INFO,
+  WARN,
+  ERROR,
+  NONE
+} log_level_t;
+extern const char * log_level_str[]; 
+void send_serial_dbg(String msg,log_level_t level);
 void read_serial_commands();
 inline bool serial_available(){return Serial.available();}
 String bool_to_on_of(bool value);

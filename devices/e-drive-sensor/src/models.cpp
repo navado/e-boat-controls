@@ -9,7 +9,7 @@ volatile engine_state_t engine_state = {0};
 
 void update_throttle_value(int val){
   if(val < 0 || val > 255){
-    send_serial_error("ERROR: Throttle value out of range");
+    send_serial_dbg("Throttle value out of range", ERROR);
     return;
   }
   engine_state.throttle = (uint8_t)val;
