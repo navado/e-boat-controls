@@ -17,8 +17,8 @@ uint8_t tokenize(String msg, char delim , String * tok,uint8_t max_tok){
     }
     i++;
   }
-  tok[j] = msg;
-  return j+1;
+  if(j < max_tok) tok[j] = msg;
+  return (j < max_tok) ? j + 1 : max_tok;
 }
 
 String bool_to_on_of(bool value){
@@ -58,8 +58,7 @@ void send_msg(Print * p, const char * msg){
   // write to print in chunks of 32 bytes
   for(size_t i=0; i<strlen(msg); i+=32){
     p->write(msg+i, min(32,strlen(msg)-i));
-    delay(2);
-  } 
+  }
   p->print("*");
   p->println(checksum, HEX);
 }
