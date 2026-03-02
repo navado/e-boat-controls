@@ -18,7 +18,7 @@ void setup_rpm_counter(){
 }
 
 void run_every_1s(){
-  engine_state.rpm = TCNT1; // TODO: Need to divide by 6 (6 pulses per revolution) or find correct prescaler
+  engine_state.rpm = TCNT1 / 6; // 6 pulses per revolution
   TCNT1=0;
 }
 
@@ -138,7 +138,7 @@ bool handle_command(String token){
     default:
   #if defined(DEBUG)
       Serial.print("WARNING: Command not supported: ");
-      Serial.println(tokens[0]);
+      Serial.println(token);
   #endif
     return false;
   }
@@ -156,7 +156,7 @@ void loop() {
   serial_sent = true;
   char msg[128];
   // ENINF,T,POW,REV,REG,THR,VTH,VCC,RESERVED
-  sprintf(msg, "ENINF,%lu,%d,%u,%u,%u,%d,%d,%ld,0",
+  snprintf(msg, sizeof(msg), "ENINF,%lu,%d,%u,%u,%u,%d,%d,%ld,0",
     millis(),
     engine_state.rpm,
     engine_state.power,

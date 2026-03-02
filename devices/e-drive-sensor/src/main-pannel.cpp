@@ -44,7 +44,7 @@ void handle_throttle(){
     if(panel_state.speed > SPD_NEUTRAL) { // Forward to faster
       panel_state.speed = min(panel_state.speed + 4, THROTTLE_TABLE_SIZE - 1);
     } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Forward
-      panel_state.speed = SPD_NEUTRAL;
+      panel_state.speed = min(SPD_NEUTRAL + 4, THROTTLE_TABLE_SIZE - 1);
     } else { // Reverse to Neutral
       panel_state.speed = SPD_NEUTRAL;
     }
@@ -53,18 +53,18 @@ void handle_throttle(){
 
   if (BTN_PRESS(btn_b) && btn_b->short_press == 0){
     btn_b->short_press = 1;
-    btn_a->ht = BTN_MILLS;
+    btn_b->ht = BTN_MILLS;
     panel_state.speed = max(panel_state.speed - 1, 0);
     PANEL_STATE_SET_CHANGED();
   }
 
   if (BTN_LONG_PRESS(btn_b) && btn_b->long_press == 0){
     btn_b->long_press = 1;
-    btn_a->ht = BTN_MILLS;
+    btn_b->ht = BTN_MILLS;
     if(panel_state.speed > SPD_NEUTRAL) { // Forward to Neutral
       panel_state.speed = max(panel_state.speed - 4, SPD_NEUTRAL);
     } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Reverse
-      panel_state.speed = SPD_NEUTRAL;
+      panel_state.speed = max(SPD_NEUTRAL - 4, 0);
     } else { // Reverse to faster
       panel_state.speed = 0;
     }
@@ -77,7 +77,7 @@ void handle_state(){
   
   if (BTN_PRESS(btn_c) && btn_c->short_press ==0 && panel_state.regen == 0 && panel_state.speed == SPD_NEUTRAL){
     btn_c->short_press = 1;
-    btn_a->ht = BTN_MILLS;
+    btn_c->ht = BTN_MILLS;
     panel_state.power = !panel_state.power;
     if (panel_state.power == 0){
       panel_state.speed = SPD_NEUTRAL;
@@ -86,7 +86,7 @@ void handle_state(){
   }
   if (BTN_PRESS(btn_d) && btn_d->short_press ==0 && panel_state.power == 1 && panel_state.speed == SPD_NEUTRAL){
     btn_d->short_press = 1;
-    btn_a->ht = BTN_MILLS;
+    btn_d->ht = BTN_MILLS;
     panel_state.regen = !panel_state.regen;
     PANEL_STATE_SET_CHANGED();
   }
@@ -119,20 +119,20 @@ void parse_serial_data(){
     len = data.length();
     msg_start = data.indexOf('$');
     msg_end = data.indexOf('*');
-    String msg = data.substring(msg_start, msg_end);
+    String msg = data.substring(msg_start + 1, msg_end); // skip '$' so checksum matches send_msg and first token is "ENINF"
     str_checksum = data.substring(msg_end+1, data.length());
     checksum = msg_checksum(msg.c_str());
     long str_checksum_val = strtol(str_checksum.c_str(), NULL, 16);
     if(checksum != str_checksum_val){
       #if LOG_LEVEL==DEBUG
        char _msg[128];
-      sprintf(_msg, "Checksum missmatch: %02X != %02X", checksum, (char)str_checksum_val);
+      snprintf(_msg, sizeof(_msg), "Checksum mismatch: %02X != %02X", checksum, (char)str_checksum_val);
       send_serial_dbg(_msg,ERROR);
       #endif
     }
     String parsed[MAX_TOKENS];
     uint8_t num_tokens = tokenize(msg, ',', parsed, MAX_TOKENS);
-    if(num_tokens == 0) return;
+    if(num_tokens < 9) return;
     if(parsed[0] != "ENINF") return;
     
     // ENINF,T,POW,REV,REG,THR,VTH,VCC
@@ -157,7 +157,7 @@ void parse_serial_data(){
 
 void send_state(){
   char _msg[128];
-  sprintf(_msg,"ENCMD,pow:%s,rev:%s,reg:%s,thr:%d",
+  snprintf(_msg, sizeof(_msg), "ENCMD,pow:%s,rev:%s,reg:%s,thr:%d",
     bool_to_on_of(panel_state.power).c_str(),
     bool_to_on_of(panel_state.speed < SPD_NEUTRAL).c_str(),
     bool_to_on_of(panel_state.regen).c_str(),
