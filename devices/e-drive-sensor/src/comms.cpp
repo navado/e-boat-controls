@@ -33,6 +33,8 @@ void send_serial_dbg(String msg,log_level_t level){
     char _msg[128];
     sprintf(_msg, "ENDBG,lvl:%s,msg:%s",log_level_str[level], msg.c_str());
     send_msg(&Serial, _msg);
+  #else
+    (void)msg; (void)level;
   #endif
 }
 

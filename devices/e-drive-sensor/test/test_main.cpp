@@ -25,7 +25,7 @@ SerialStub Serial;
 // ── setUp / tearDown ─────────────────────────────────────────────────────────
 void setUp(void) {
   // Reset engine state before each test (cast away volatile for re-initialization)
-  engine_state_t zero = {0};
+  engine_state_t zero = {};
   *(engine_state_t*)&engine_state = zero;
 }
 void tearDown(void) {}

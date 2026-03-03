@@ -4,9 +4,9 @@
 #include "comms.h"
 
 const uint8_t throttle_table[] = {245, 224, 185, 145, 110, 1, 110, 145, 185, 224, 254};
-volatile panel_state_t panel_state = {0};
-volatile engine_state_t engine_state = {0};
-gps_state_t gps_state = {0};
+volatile panel_state_t panel_state = {};
+volatile engine_state_t engine_state = {};
+gps_state_t gps_state = {};
 throttle_state_t throttle_state = {MODE_RPM, 0, 0, 0, 1, 1, 1, 0, 0};
 
 const char * throttle_mode_names[] = {"RPM", "PWR", "SOG", "SOW", "RNG"};
