@@ -8,6 +8,11 @@
 
 
 bool serial_sent = false;
+
+// ── Water speed impeller pulse counter ────────────────────────────────────────
+static volatile uint16_t water_pulse_count = 0;
+void water_speed_isr() { water_pulse_count++; }
+
 void setup_rpm_counter(){
   pinMode(RPM_PIN, INPUT);
   TCCR1A=0; // setup timer-1
@@ -20,11 +25,28 @@ void setup_rpm_counter(){
 void run_every_1s(){
   engine_state.rpm = TCNT1 / 6; // 6 pulses per revolution
   TCNT1=0;
+
+  // Water speed: pulses / WATER_PULSES_PER_M = metres/s → convert to knots*10
+  // 1 m/s = 1.9438 kn;  kn*10 = m/s * 19.438
+  uint16_t pulses = water_pulse_count;
+  water_pulse_count = 0;
+  engine_state.water_kn10 = (uint16_t)((uint32_t)pulses * 19438 / (WATER_PULSES_PER_M * 1000));
+
+  // Current sensing: ADC → mA
+  // curr_mA = ADC_val * (Vref_mV / 1023) / CURR_MV_PER_AMP * 1000
+  uint16_t adc_curr = analogRead(CURR_SENS_IN);
+  engine_state.curr_ma = (uint16_t)((uint32_t)adc_curr * 5000 / 1023 * 1000 / CURR_MV_PER_AMP);
+
+  // Power: P = V(mV) * I(mA) / 1e6  → W
+  uint32_t v_mv = (uint32_t)engine_state.vcc48v; // already in mV (mapped in ENINF)
+  uint32_t i_ma = engine_state.curr_ma;
+  engine_state.power_w = (uint16_t)((v_mv * i_ma) / 1000000UL);
 }
 
 void run_every_100ms(){
   engine_state.throttle_val = analogRead(THROTTLE_IN);
-  engine_state.vcc48v = analogRead(VCC_SENS_IN);
+  uint16_t raw_vcc = analogRead(VCC_SENS_IN);
+  engine_state.vcc48v = (uint16_t)map(raw_vcc, 0, 1023, 0, 100000); // store as mV
   update_buttons();
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
 }
@@ -59,6 +81,9 @@ void setup() {
   pinMode(THROTTLE_OUT, OUTPUT);
   // VCC
   pinMode(VCC_SENS_IN, INPUT);
+  // Water speed impeller
+  pinMode(WATER_SPD_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(WATER_SPD_PIN), water_speed_isr, FALLING);
   // Timers/counters
   setup_rpm_counter();
   setup_timing_functions();
@@ -134,6 +159,14 @@ bool handle_command(String token){
       engine_state.regen = 0;
       engine_state.throttle = 0;
       break;
+    case CMD_MODE:
+      // Sensor stores mode for telemetry forwarding; control logic lives in throttle device
+      if (tok[1].toInt() < MODE_COUNT)
+        throttle_state.mode = (throttle_mode_t)tok[1].toInt();
+      break;
+    case CMD_TARGET:
+      throttle_state.target_val = (uint16_t)tok[1].toInt();
+      break;
     case CMD_UNKNOWN:
     default:
   #if defined(DEBUG)
@@ -154,17 +187,21 @@ void loop() {
 
   
   serial_sent = true;
-  char msg[128];
-  // ENINF,T,POW,REV,REG,THR,VTH,VCC,RESERVED
-  snprintf(msg, sizeof(msg), "ENINF,%lu,%d,%u,%u,%u,%d,%d,%ld,0",
+  char msg[192];
+  // ENINF,T,RPM,POW,REV,REG,THR,VTH_MV,VCC_MV,CURR_MA,POWER_W,WATER_KN10
+  snprintf(msg, sizeof(msg),
+    "ENINF,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
     millis(),
     engine_state.rpm,
     engine_state.power,
     engine_state.reverse,
     engine_state.regen,
     engine_state.throttle,
-    map(engine_state.throttle_val,0,1023,0,5000),
-    map(engine_state.vcc48v,0,1023,0,100000)
+    (unsigned)map(engine_state.throttle_val, 0, 1023, 0, 5000),
+    engine_state.vcc48v,       // already in mV (set in run_every_100ms)
+    engine_state.curr_ma,
+    engine_state.power_w,
+    engine_state.water_kn10
   );
     while (Serial.available())
   {

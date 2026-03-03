@@ -74,11 +74,13 @@ char msg_checksum(const char * msg, char initial, int len)
 }
 
 cmd_t parse_cmd(String cmd){
-  if(cmd == "pow") return CMD_POWER;
-  if(cmd == "rev") return CMD_REVERSE;
-  if(cmd == "reg") return CMD_REGEN;
-  if(cmd == "thr") return CMD_THROTTLE;
-  if(cmd == "rst") return CMD_RESET;
+  if(cmd == "pow")    return CMD_POWER;
+  if(cmd == "rev")    return CMD_REVERSE;
+  if(cmd == "reg")    return CMD_REGEN;
+  if(cmd == "thr")    return CMD_THROTTLE;
+  if(cmd == "rst")    return CMD_RESET;
+  if(cmd == "mode")   return CMD_MODE;
+  if(cmd == "target") return CMD_TARGET;
   return CMD_UNKNOWN;
 }
 
@@ -95,7 +97,8 @@ void read_engine_commands(bool (*handle_cmd)(String token)){
   Serial.println();
   if(num_tokens == 0) return;
   uint8_t good_tokens = 0;
-  if(tokens[0] == "$ENCMD"){
+  // Accept both manual panel commands (ENCMD) and throttle device commands (THRCMD)
+  if(tokens[0] == "$" MSG_ENG_CMD || tokens[0] == "$" MSG_THR_CMD){
     for(uint8_t i=1; i< num_tokens; i++){
       if(handle_cmd(tokens[i])) good_tokens++;
     }

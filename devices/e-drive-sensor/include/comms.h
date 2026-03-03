@@ -9,8 +9,17 @@ enum cmd_t {
   CMD_REGEN,
   CMD_THROTTLE,
   CMD_RESET,
+  CMD_MODE,    // mode:<0-4>   — throttle control mode
+  CMD_TARGET,  // target:<val> — mode target (RPM / W / kn*10)
   CMD_UNKNOWN
 };
+
+// Message type identifiers (all frames: $<TYPE>,<fields>*<CRC>\n)
+#define MSG_ENG_INFO  "ENINF"   // Sensor   → all    : engine telemetry
+#define MSG_ENG_CMD   "ENCMD"   // Panel    → sensor : manual control
+#define MSG_THR_CMD   "THRCMD"  // Throttle → sensor : primary control
+#define MSG_THR_INFO  "THRINF"  // Throttle → all    : mode / GPS status
+#define MSG_PAN_CTL   "PANCTL"  // Throttle → panel  : panel power control
 
 void send_serial_field(
     Print * p,

@@ -79,13 +79,15 @@ void printColumn1(){
 
 void printColumn2(){
   uint8_t _x=64, _y = 8;
-  _y = printKWLabel(_x, _y, "PAT: ", millis()/1000);
-  _y = printKWLabel(_x, _y, "POW: ", panel_state.power);
+  // Throttle mode (from throttle device via THRINF)
+  _y = printKWLabel(_x, _y, "MOD: ", throttle_mode_names[throttle_state.mode]);
+  // Current (mA) and power (W)
+  _y = printKWLabel(_x, _y, "CUR: ", (uint32_t)engine_state.curr_ma);
+  _y = printKWLabel(_x, _y, "POW: ", (uint32_t)engine_state.power_w);
+  // GPS speed over ground (tenths of a knot → display as "x.y kn")
   char _buf[16];
-  sprintf(_buf, "%d:%d", panel_state.speed, throttle_table[panel_state.speed]);
-  _y = printKWLabel(_x, _y, "THR: ", (const char *)_buf);
-  _y = printKWLabel(_x, _y, "REG: ", panel_state.regen);
-
+  snprintf(_buf, sizeof(_buf), "%d.%d", gps_state.sog_kn10 / 10, gps_state.sog_kn10 % 10);
+  _y = printKWLabel(_x, _y, "SOG: ", (const char *)_buf);
 }
 
 void printSmileyFont(uint8_t index){
@@ -114,8 +116,7 @@ void draw_screen(){
   do
   {
     printColumn1();
-    // printColumn2();
-    display_serial_data();
+    printColumn2();
     printBigLabel();
   } while (lcd.nextPage());
 }

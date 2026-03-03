@@ -119,7 +119,8 @@ void parse_serial_data(){
     len = data.length();
     msg_start = data.indexOf('$');
     msg_end = data.indexOf('*');
-    String msg = data.substring(msg_start + 1, msg_end); // skip '$' so checksum matches send_msg and first token is "ENINF"
+    if (msg_start < 0 || msg_end <= msg_start) return;
+    String msg = data.substring(msg_start + 1, msg_end); // skip '$'
     str_checksum = data.substring(msg_end+1, data.length());
     checksum = msg_checksum(msg.c_str());
     long str_checksum_val = strtol(str_checksum.c_str(), NULL, 16);
@@ -129,29 +130,36 @@ void parse_serial_data(){
       snprintf(_msg, sizeof(_msg), "Checksum mismatch: %02X != %02X", checksum, (char)str_checksum_val);
       send_serial_dbg(_msg,ERROR);
       #endif
+      return;
     }
     String parsed[MAX_TOKENS];
     uint8_t num_tokens = tokenize(msg, ',', parsed, MAX_TOKENS);
-    if(num_tokens < 9) return;
-    if(parsed[0] != "ENINF") return;
-    
-    // ENINF,T,POW,REV,REG,THR,VTH,VCC
+    if (num_tokens < 2) return;
 
-    engine_state.T = parsed[1].toInt();
-    engine_state.rpm = parsed[2].toInt();
-    engine_state.power = parsed[3].toInt();
-    engine_state.reverse = parsed[4].toInt();
-    engine_state.regen = parsed[5].toInt();
-    engine_state.throttle = parsed[6].toInt();
-    engine_state.throttle_val = parsed[7].toInt();
-    engine_state.vcc48v = parsed[8].toInt();
-    engine_state.changed = 1;
-    Serial.print("$ENDBG,len:");
-    Serial.print(msg.length());
-    Serial.print(",rxc:");
-    Serial.print(str_checksum);
-    Serial.print(",c:");
-    Serial.println(checksum, HEX);
+    if (parsed[0] == MSG_ENG_INFO && num_tokens >= 9) {
+      // ENINF,T,RPM,POW,REV,REG,THR,VTH_MV,VCC_MV[,CURR_MA,POWER_W,WATER_KN10]
+      engine_state.T          = parsed[1].toInt();
+      engine_state.rpm        = parsed[2].toInt();
+      engine_state.power      = parsed[3].toInt();
+      engine_state.reverse    = parsed[4].toInt();
+      engine_state.regen      = parsed[5].toInt();
+      engine_state.throttle   = parsed[6].toInt();
+      engine_state.throttle_val = parsed[7].toInt();
+      engine_state.vcc48v     = (uint16_t)parsed[8].toInt();
+      if (num_tokens >= 10) engine_state.curr_ma    = (uint16_t)parsed[9].toInt();
+      if (num_tokens >= 11) engine_state.power_w    = (uint16_t)parsed[10].toInt();
+      if (num_tokens >= 12) engine_state.water_kn10 = (uint16_t)parsed[11].toInt();
+      engine_state.changed = 1;
+
+    } else if (parsed[0] == MSG_THR_INFO && num_tokens >= 7) {
+      // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg
+      throttle_state.mode      = (throttle_mode_t)parsed[2].toInt();
+      throttle_state.target_val = (uint16_t)parsed[3].toInt();
+      gps_state.sog_kn10       = (uint16_t)parsed[4].toInt();
+      gps_state.sow_kn10       = (uint16_t)parsed[5].toInt();
+      gps_state.cog_deg        = (uint16_t)parsed[6].toInt();
+      gps_state.valid          = (gps_state.sog_kn10 > 0 || gps_state.cog_deg > 0);
+    }
   }
 }
 
