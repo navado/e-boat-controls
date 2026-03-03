@@ -2,23 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop, "claude/**", "feature/**"]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
 
 jobs:
   # ── Unit tests (pure C++, no hardware required) ───────────────────────────
   test:
     name: Unit tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: devices/e-drive-sensor
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Compile test suite
+        working-directory: devices/e-drive-sensor
         run: |
           g++ -std=c++14 \
             -I include \
@@ -32,7 +30,7 @@ jobs:
       - name: Run unit tests
         run: /tmp/e_boat_tests
 
-  # ── Firmware builds (matrix across all three targets) ────────────────────
+  # ── Firmware builds (matrix across all firmware targets) ──────────────────
   build:
     name: Build (${{ matrix.env }})
     runs-on: ubuntu-latest
@@ -41,10 +39,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env:
-          - sensor       # Arduino Nano — motor controller
-          - avr-pannel   # Arduino Nano — control panel
-          - stm-panel    # STM32 Bluepill — control panel
+        include:
+          - env: sensor
+            description: "Arduino Nano — motor/sensor controller"
+          - env: avr-pannel
+            description: "Arduino Nano — control panel"
+          - env: stm-panel
+            description: "STM32 BluePill — control panel"
+          - env: throttle-stm
+            description: "STM32 BluePill — throttle controller (pot input)"
+          - env: throttle-stm-enc
+            description: "STM32 BluePill — throttle controller (encoder input)"
 
     steps:
       - uses: actions/checkout@v4
@@ -68,11 +73,10 @@ jobs:
         run: pip install platformio
 
       - name: Build firmware — ${{ matrix.env }}
-        run: |
-          cd devices/e-drive-sensor
-          pio run -e ${{ matrix.env }}
+        working-directory: devices/e-drive-sensor
+        run: pio run -e ${{ matrix.env }}
 
-      # Upload the compiled .hex / .elf as a build artifact
+      # Upload compiled .hex / .elf / .bin as build artifacts
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
@@ -81,4 +85,29 @@ jobs:
             devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.hex
             devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.elf
             devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.bin
+          if-no-files-found: warn
+
+  # ── Collect all firmware into a single release artifact ───────────────────
+  package:
+    name: Package all firmware
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: firmware
+
+      - name: List collected firmware
+        run: find firmware -type f | sort
+
+      - name: Upload combined firmware package
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-all-${{ github.sha }}
+          path: firmware/
+          retention-days: 90
           if-no-files-found: warn
