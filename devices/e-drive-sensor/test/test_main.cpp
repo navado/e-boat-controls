@@ -354,14 +354,67 @@ void test_thrcmd_tokenize(void) {
 }
 
 void test_eninf_extended_tokenize(void) {
-  // Extended ENINF with curr_ma, power_w, water_kn10
+  // Extended ENINF with curr_ma, power_w, water_kn10, slip_pct10
   String tok[MAX_TOKENS];
-  const char * body = "ENINF,10000,1200,1,0,0,145,2400,48000,15000,720,12";
+  const char * body = "ENINF,10000,1200,1,0,0,145,2400,48000,15000,720,12,350";
   uint8_t n = tokenize(body, ',', tok, MAX_TOKENS);
-  TEST_ASSERT_EQUAL(12, n);
+  TEST_ASSERT_EQUAL(13, n);
   TEST_ASSERT_EQUAL(15000, tok[9].toInt());  // curr_ma
   TEST_ASSERT_EQUAL(720,   tok[10].toInt()); // power_w
   TEST_ASSERT_EQUAL(12,    tok[11].toInt()); // water_kn10
+  TEST_ASSERT_EQUAL(350,   tok[12].toInt()); // slip_pct10 = 35.0 %
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// calc_prop_slip()
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_slip_zero_rpm(void) {
+  // Slip undefined at zero RPM → returns 0
+  TEST_ASSERT_EQUAL(0, calc_prop_slip(0, 50, 600));
+}
+
+void test_slip_zero_pitch(void) {
+  TEST_ASSERT_EQUAL(0, calc_prop_slip(1000, 50, 0));
+}
+
+void test_slip_full_slip(void) {
+  // SOW == 0 while RPM > 0: 100 % slip (churning in place)
+  int16_t slip = calc_prop_slip(1000, 0, 600);
+  TEST_ASSERT_EQUAL(1000, slip); // 100.0 %
+}
+
+void test_slip_zero_slip(void) {
+  // SOW exactly matches theoretical speed → 0 % slip
+  // v_theoretical = 1000 * 600 / 60000 = 10 m/s
+  // 10 m/s in kn*10 = 10 / 0.05144 ≈ 194.4 → use 194
+  // expected slip ≈ (1 - 194*0.05144/10)*100 = (1 - 9.98/10)*100 = 0.2 %
+  // We just check it's near zero (< 5 = 0.5 %)
+  int16_t slip = calc_prop_slip(1000, 194, 600);
+  TEST_ASSERT_TRUE(slip >= -5 && slip <= 5);
+}
+
+void test_slip_typical(void) {
+  // Typical scenario: 1000 RPM, 600 mm pitch → v_theoretical = 10 m/s
+  // Boat doing 5 m/s (SOW = 97 kn*10) → slip = 50 %
+  // v_actual = 97 * 0.05144 = 4.99 m/s  → slip = (1 - 4.99/10)*100 ≈ 50.1 %
+  int16_t slip = calc_prop_slip(1000, 97, 600);
+  // Allow ±5 (±0.5 %) tolerance for floating-point rounding
+  TEST_ASSERT_TRUE(slip >= 495 && slip <= 510); // ~50 %
+}
+
+void test_slip_clamped_at_100(void) {
+  // Very high slip scenario should clamp at 100 %
+  int16_t slip = calc_prop_slip(100, 0, 100); // extreme slip
+  TEST_ASSERT_EQUAL(1000, slip); // clamped at 100.0 %
+}
+
+void test_slip_negative(void) {
+  // Negative slip: following current pushing boat faster than prop advance
+  // v_theoretical = 500 * 600 / 60000 = 5 m/s
+  // v_actual = 200 kn*10 * 0.05144 = 10.29 m/s → slip = (1 - 10.29/5)*100 = -105.8 → clamped -100
+  int16_t slip = calc_prop_slip(500, 200, 600);
+  TEST_ASSERT_EQUAL(-1000, slip); // clamped at -100.0 %
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -442,6 +495,15 @@ int main(void) {
   RUN_TEST(test_thrinf_tokenize);
   RUN_TEST(test_thrcmd_tokenize);
   RUN_TEST(test_eninf_extended_tokenize);
+
+  // calc_prop_slip
+  RUN_TEST(test_slip_zero_rpm);
+  RUN_TEST(test_slip_zero_pitch);
+  RUN_TEST(test_slip_full_slip);
+  RUN_TEST(test_slip_zero_slip);
+  RUN_TEST(test_slip_typical);
+  RUN_TEST(test_slip_clamped_at_100);
+  RUN_TEST(test_slip_negative);
 
   return UNITY_END();
 }

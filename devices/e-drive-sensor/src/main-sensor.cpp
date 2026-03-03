@@ -9,10 +9,6 @@
 
 bool serial_sent = false;
 
-// ── Water speed impeller pulse counter ────────────────────────────────────────
-static volatile uint16_t water_pulse_count = 0;
-void water_speed_isr() { water_pulse_count++; }
-
 void setup_rpm_counter(){
   pinMode(RPM_PIN, INPUT);
   TCCR1A=0; // setup timer-1
@@ -26,11 +22,7 @@ void run_every_1s(){
   engine_state.rpm = TCNT1 / 6; // 6 pulses per revolution
   TCNT1=0;
 
-  // Water speed: pulses / WATER_PULSES_PER_M = metres/s → convert to knots*10
-  // 1 m/s = 1.9438 kn;  kn*10 = m/s * 19.438
-  uint16_t pulses = water_pulse_count;
-  water_pulse_count = 0;
-  engine_state.water_kn10 = (uint16_t)((uint32_t)pulses * 19438 / (WATER_PULSES_PER_M * 1000));
+  // water_kn10 is updated by parse_bus_serial() when THRINF arrives from throttle device
 
   // Current sensing: ADC → mA
   // curr_mA = ADC_val * (Vref_mV / 1023) / CURR_MV_PER_AMP * 1000
@@ -38,9 +30,13 @@ void run_every_1s(){
   engine_state.curr_ma = (uint16_t)((uint32_t)adc_curr * 5000 / 1023 * 1000 / CURR_MV_PER_AMP);
 
   // Power: P = V(mV) * I(mA) / 1e6  → W
-  uint32_t v_mv = (uint32_t)engine_state.vcc48v; // already in mV (mapped in ENINF)
+  uint32_t v_mv = (uint32_t)engine_state.vcc48v;
   uint32_t i_ma = engine_state.curr_ma;
   engine_state.power_w = (uint16_t)((v_mv * i_ma) / 1000000UL);
+
+  // Propeller slip (requires water speed from THRINF)
+  engine_state.prop_slip_pct10 = calc_prop_slip(
+    engine_state.rpm, engine_state.water_kn10, PROP_PITCH_MM);
 }
 
 void run_every_100ms(){
@@ -81,9 +77,6 @@ void setup() {
   pinMode(THROTTLE_OUT, OUTPUT);
   // VCC
   pinMode(VCC_SENS_IN, INPUT);
-  // Water speed impeller
-  pinMode(WATER_SPD_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(WATER_SPD_PIN), water_speed_isr, FALLING);
   // Timers/counters
   setup_rpm_counter();
   setup_timing_functions();
@@ -178,19 +171,57 @@ bool handle_command(String token){
   return true;
 }
 
+// ── Bus serial dispatcher ─────────────────────────────────────────────────────
+// Reads one line and dispatches:
+//   ENCMD / THRCMD  → command handler (motor control)
+//   THRINF          → extract sow_kn10 / sog_kn10 for slip calculation
+static String _bus_tokens[MAX_TOKENS];
+void handle_bus_serial() {
+  String line = Serial.readStringUntil('\n');
+  uint8_t n = tokenize(line, ',', _bus_tokens, MAX_TOKENS);
+  if (n == 0) return;
+  const String & hdr = _bus_tokens[0];
+
+  if (hdr == "$" MSG_ENG_CMD || hdr == "$" MSG_THR_CMD) {
+    // Command tokens start at index 1; strip trailing '*XX' from last token
+    // (checksum validation skipped here — sensor trusts bus devices)
+    uint8_t good = 0;
+    for (uint8_t i = 1; i < n; i++) {
+      // Strip checksum from last token if present
+      String tok = _bus_tokens[i];
+      int star = tok.indexOf('*');
+      if (star >= 0) tok = tok.substring(0, star);
+      if (handle_command(tok)) good++;
+    }
+    (void)good;
+
+  } else if (hdr == "$" MSG_THR_INFO && n >= 7) {
+    // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg[*CRC]
+    // Update water speed and GPS speed used for slip calculation
+    String sow_str = _bus_tokens[5];
+    int star = sow_str.indexOf('*');
+    if (star >= 0) sow_str = sow_str.substring(0, star);
+    engine_state.water_kn10 = (uint16_t)sow_str.toInt();
+    // Also update gps_state for throttle mode PID if running on sensor (unused here)
+    gps_state.sog_kn10 = (uint16_t)_bus_tokens[4].toInt();
+    gps_state.cog_deg  = (uint16_t)_bus_tokens[6].toInt();
+    gps_state.valid    = 1;
+    gps_state.sow_valid = (engine_state.water_kn10 > 0);
+  }
+}
+
 void loop() {
   if(serial_available()){
-    read_engine_commands(handle_command);
+    handle_bus_serial();
   }
   set_state();
   if (serial_sent) return;
 
-  
   serial_sent = true;
-  char msg[192];
-  // ENINF,T,RPM,POW,REV,REG,THR,VTH_MV,VCC_MV,CURR_MA,POWER_W,WATER_KN10
+  char msg[220];
+  // ENINF,T,RPM,POW,REV,REG,THR,VTH_MV,VCC_MV,CURR_MA,POWER_W,WATER_KN10,SLIP_PCT10
   snprintf(msg, sizeof(msg),
-    "ENINF,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+    "ENINF,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d",
     millis(),
     engine_state.rpm,
     engine_state.power,
@@ -198,15 +229,13 @@ void loop() {
     engine_state.regen,
     engine_state.throttle,
     (unsigned)map(engine_state.throttle_val, 0, 1023, 0, 5000),
-    engine_state.vcc48v,       // already in mV (set in run_every_100ms)
+    engine_state.vcc48v,
     engine_state.curr_ma,
     engine_state.power_w,
-    engine_state.water_kn10
+    engine_state.water_kn10,
+    engine_state.prop_slip_pct10
   );
-    while (Serial.available())
-  {
-    Serial.read();
-  }
+  while (Serial.available()) Serial.read();
   send_msg(&Serial, msg);
 }
 

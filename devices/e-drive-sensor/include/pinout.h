@@ -9,7 +9,8 @@
 #define THROTTLE_OUT 6      // D6 PWM -> Throttle RC filter -> Motor throttle in
 #define VCC_SENS_IN A1      // 470k/20k voltage divider (measures 48 V bus)
 #define CURR_SENS_IN A6     // Shunt amplifier output -> motor current (mA)
-#define WATER_SPD_PIN 3     // D3 interrupt -> impeller pulse input (water speed)
+// NOTE: water speed comes from NMEA0183/2000 via the throttle device (THRINF message)
+// D3 (formerly impeller ISR) is now available as RELAY_SPARE or future use
 
 #define RELAY_LOCK 8         //D8 -> Relay 1 (motor enable)
 #define RELAY_REVERSE 7      //D7 -> Relay 2 (direction)
@@ -24,7 +25,6 @@
 // Current sensing calibration: shunt amplifier 50mV/A, ADC Vref 5V
 // curr_mA = (ADC * 5000 / 1023) / 50 * 1000  →  ADC * 97.75
 #define CURR_MV_PER_AMP   50
-#define WATER_PULSES_PER_M 10  // impeller pulses per metre of travel
 #elif defined(PANNEL_STM32)
 // Bluepill based board
 #define LED_BRD PC_13          // C13 LED on board
@@ -83,6 +83,13 @@
 
 // Buzzer (passive, driven with tone() or analogWrite)
 #define BUZZER_PIN      PA8   // TIM1_CH1
+
+// NMEA 2000 CAN bus (requires external SN65HVD230 or equivalent transceiver)
+// PGN 128259 (0x1F503) — Speed Through Water
+// PGN 129026 (0x1F802) — COG & SOG, Rapid Update
+// Enable with -D NMEA2000 build flag
+#define NMEA2000_CAN_RX  PA11  // CAN_RX (remapped)
+#define NMEA2000_CAN_TX  PA12  // CAN_TX (remapped)
 
 #endif
 #endif

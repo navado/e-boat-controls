@@ -51,3 +51,17 @@ void pid_reset(pid_state_t * pid) {
   pid->prev_error  = 0.0f;
   pid->prev_output = pid->output_min;
 }
+
+// ── Propeller slip ────────────────────────────────────────────────────────────
+int16_t calc_prop_slip(uint16_t rpm, uint16_t sow_kn10, uint16_t pitch_mm) {
+  if (rpm == 0 || pitch_mm == 0) return 0;
+  // Theoretical speed through water (m/s): RPM * pitch(mm) / 60000
+  float v_theoretical = (float)rpm * (float)pitch_mm / 60000.0f;
+  // Actual speed through water (m/s): knots * 0.5144 / 10
+  float v_actual = (float)sow_kn10 * 0.05144f;
+  float slip = (1.0f - v_actual / v_theoretical) * 100.0f;
+  // Clamp to ±100 % and return as tenths of a percent
+  if (slip >  100.0f) slip =  100.0f;
+  if (slip < -100.0f) slip = -100.0f;
+  return (int16_t)(slip * 10.0f);
+}

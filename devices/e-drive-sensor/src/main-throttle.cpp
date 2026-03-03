@@ -360,6 +360,57 @@ static void read_nmea_gps() {
   }
 }
 
+// ── NMEA 2000 (CAN bus) ───────────────────────────────────────────────────────
+// Requires external CAN transceiver (SN65HVD230 or equivalent) on PA11/PA12
+// and the NMEA2000 + NMEA2000_stm32 libraries.
+// Enable with -D NMEA2000 build flag.
+//
+// Relevant PGNs:
+//   128259 (0x1F503)  Speed Through Water  — field: Speed (0.01 m/s units)
+//   129026 (0x1F802)  COG & SOG Rapid      — fields: COG, SOG (0.0001 rad/s and 0.01 m/s)
+//
+// Implementation stub — wire up library calls here when CAN hardware is fitted.
+#if defined(NMEA2000)
+#include <NMEA2000_CAN.h>   // platform CAN driver
+#include <N2kMessages.h>
+
+static void nmea2000_msg_handler(const tN2kMsg & msg) {
+  switch (msg.PGN) {
+    case 128259: { // Speed Through Water
+      double sow_ms;
+      if (ParseN2kBoatSpeed(msg, sow_ms)) {
+        // 1 m/s = 19.438 kn*10
+        gps_state.sow_kn10  = (uint16_t)(sow_ms * 19.438f);
+        gps_state.sow_valid = 1;
+      }
+      break;
+    }
+    case 129026: { // COG & SOG Rapid
+      uint8_t sid; tN2kHeadingReference ref; double cog_rad, sog_ms;
+      if (ParseN2kCOGSOGRapid(msg, sid, ref, cog_rad, sog_ms)) {
+        gps_state.sog_kn10 = (uint16_t)(sog_ms * 19.438f);
+        gps_state.cog_deg  = (uint16_t)(cog_rad * 180.0f / PI);
+        gps_state.valid    = 1;
+      }
+      break;
+    }
+    default: break;
+  }
+}
+
+static void setup_nmea2000() {
+  NMEA2000.SetMsgHandler(nmea2000_msg_handler);
+  NMEA2000.Open();
+}
+
+static void read_nmea2000() {
+  NMEA2000.ParseMessages();
+}
+#else
+static inline void setup_nmea2000() {}
+static inline void read_nmea2000()  {}
+#endif // NMEA2000
+
 // ── Bus ENINF parser ──────────────────────────────────────────────────────────
 static void parse_bus_data() {
   if (!Serial.available()) return;
@@ -385,9 +436,10 @@ static void parse_bus_data() {
   engine_state.throttle   = parsed[6].toInt();
   engine_state.throttle_val = parsed[7].toInt();
   engine_state.vcc48v     = (uint16_t)parsed[8].toInt();
-  if (n >= 10) engine_state.curr_ma    = (uint16_t)parsed[9].toInt();
-  if (n >= 11) engine_state.power_w    = (uint16_t)parsed[10].toInt();
-  if (n >= 12) engine_state.water_kn10 = (uint16_t)parsed[11].toInt();
+  if (n >= 10) engine_state.curr_ma       = (uint16_t)parsed[9].toInt();
+  if (n >= 11) engine_state.power_w       = (uint16_t)parsed[10].toInt();
+  if (n >= 12) engine_state.water_kn10   = (uint16_t)parsed[11].toInt();
+  if (n >= 13) engine_state.prop_slip_pct10 = (int16_t)parsed[12].toInt();
   last_eninf_ms = millis();
 }
 
@@ -489,6 +541,8 @@ void setup() {
   // pot fallback
 #endif
 
+  setup_nmea2000(); // no-op unless -D NMEA2000
+
   // Startup blink: solid blue for 500 ms
   analogWrite(LED_B_PIN, 200);
   delay(500);
@@ -500,8 +554,9 @@ void setup() {
 }
 
 void loop() {
-  // 1. Read GPS NMEA 0183
+  // 1. Read speed/position data — NMEA 0183 on Serial2 and/or NMEA 2000 via CAN
   read_nmea_gps();
+  read_nmea2000();
 
   // 2. Read bus (collect ENINF feedback from sensor)
   parse_bus_data();

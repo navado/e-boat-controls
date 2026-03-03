@@ -33,7 +33,8 @@ typedef struct {
   unsigned long T;          // Timestamp
   uint16_t curr_ma;         // Motor current (mA)
   uint16_t power_w;         // Motor power (W)
-  uint16_t water_kn10;      // Water speed (knots * 10, from impeller)
+  uint16_t water_kn10;      // Water speed (knots * 10, from NMEA via throttle device)
+  int16_t  prop_slip_pct10; // Propeller slip (% * 10, signed; positive = slipping)
 } engine_state_t;
 extern volatile engine_state_t engine_state;
 
@@ -101,5 +102,23 @@ typedef struct {
 } throttle_state_t;
 
 extern throttle_state_t throttle_state;
+
+// ── Propeller slip ────────────────────────────────────────────────────────────
+// Propeller pitch: distance the vessel would advance per revolution with zero slip.
+// Set at build time via -D PROP_PITCH_MM=<value>.  Default 600 mm (typical small vessel).
+#ifndef PROP_PITCH_MM
+#define PROP_PITCH_MM 600
+#endif
+
+// Calculate apparent propeller slip.
+// Returns slip * 10 (tenths of a percent, signed).
+//   +ve = slipping (propeller churning more than advancing)
+//   -ve = negative slip (e.g. sailing with engine assist in following current)
+//   0   = no slip (or RPM == 0 → undefined)
+//
+// Formula:  slip% = (1 - v_actual / v_theoretical) * 100
+//   v_theoretical (m/s) = rpm * pitch_mm / 60000
+//   v_actual      (m/s) = sow_kn10 * 0.05144
+int16_t calc_prop_slip(uint16_t rpm, uint16_t sow_kn10, uint16_t pitch_mm);
 
 #endif

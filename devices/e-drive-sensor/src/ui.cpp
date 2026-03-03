@@ -79,15 +79,29 @@ void printColumn1(){
 
 void printColumn2(){
   uint8_t _x=64, _y = 8;
+  char _buf[16];
+
   // Throttle mode (from throttle device via THRINF)
   _y = printKWLabel(_x, _y, "MOD: ", throttle_mode_names[throttle_state.mode]);
-  // Current (mA) and power (W)
-  _y = printKWLabel(_x, _y, "CUR: ", (uint32_t)engine_state.curr_ma);
+
+  // Power (W) — most useful at a glance
   _y = printKWLabel(_x, _y, "POW: ", (uint32_t)engine_state.power_w);
-  // GPS speed over ground (tenths of a knot → display as "x.y kn")
-  char _buf[16];
-  snprintf(_buf, sizeof(_buf), "%d.%d", gps_state.sog_kn10 / 10, gps_state.sog_kn10 % 10);
-  _y = printKWLabel(_x, _y, "SOG: ", (const char *)_buf);
+
+  // Speed over ground / water ("x.y" in knots)
+  snprintf(_buf, sizeof(_buf), "%d.%d/%d.%d",
+    gps_state.sog_kn10 / 10, gps_state.sog_kn10 % 10,
+    gps_state.sow_kn10 / 10, gps_state.sow_kn10 % 10);
+  _y = printKWLabel(_x, _y, "SPD: ", (const char *)_buf);
+
+  // Propeller slip: "xx.x%" or negative for following current
+  // prop_slip_pct10 is slip * 10; show one decimal place
+  int16_t sl = engine_state.prop_slip_pct10;
+  if (sl < 0) {
+    snprintf(_buf, sizeof(_buf), "-%d.%d%%", (-sl)/10, (-sl)%10);
+  } else {
+    snprintf(_buf, sizeof(_buf), "%d.%d%%", sl/10, sl%10);
+  }
+  _y = printKWLabel(_x, _y, "SLP: ", (const char *)_buf);
 }
 
 void printSmileyFont(uint8_t index){

@@ -146,9 +146,10 @@ void parse_serial_data(){
       engine_state.throttle   = parsed[6].toInt();
       engine_state.throttle_val = parsed[7].toInt();
       engine_state.vcc48v     = (uint16_t)parsed[8].toInt();
-      if (num_tokens >= 10) engine_state.curr_ma    = (uint16_t)parsed[9].toInt();
-      if (num_tokens >= 11) engine_state.power_w    = (uint16_t)parsed[10].toInt();
-      if (num_tokens >= 12) engine_state.water_kn10 = (uint16_t)parsed[11].toInt();
+      if (num_tokens >= 10) engine_state.curr_ma        = (uint16_t)parsed[9].toInt();
+      if (num_tokens >= 11) engine_state.power_w        = (uint16_t)parsed[10].toInt();
+      if (num_tokens >= 12) engine_state.water_kn10     = (uint16_t)parsed[11].toInt();
+      if (num_tokens >= 13) engine_state.prop_slip_pct10 = (int16_t)parsed[12].toInt();
       engine_state.changed = 1;
 
     } else if (parsed[0] == MSG_THR_INFO && num_tokens >= 7) {
