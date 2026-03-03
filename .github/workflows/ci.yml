@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Unit tests (pure C++, no hardware required) ───────────────────────────
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: devices/e-drive-sensor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile test suite
+        run: |
+          g++ -std=c++14 \
+            -I include \
+            -I test \
+            -D NATIVE_TEST \
+            -D LOG_LEVEL=4 \
+            -Wall -Wextra -Werror \
+            src/comms.cpp src/models.cpp test/test_main.cpp \
+            -o /tmp/e_boat_tests
+
+      - name: Run unit tests
+        run: /tmp/e_boat_tests
+
+  # ── Firmware builds (matrix across all three targets) ────────────────────
+  build:
+    name: Build (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - sensor       # Arduino Nano — motor controller
+          - avr-pannel   # Arduino Nano — control panel
+          - stm-panel    # STM32 Bluepill — control panel
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # Cache PlatformIO toolchains and packages between runs
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-${{ matrix.env }}-${{ hashFiles('devices/e-drive-sensor/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-${{ matrix.env }}-
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware — ${{ matrix.env }}
+        run: |
+          cd devices/e-drive-sensor
+          pio run -e ${{ matrix.env }}
+
+      # Upload the compiled .hex / .elf as a build artifact
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: |
+            devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.hex
+            devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.elf
+            devices/e-drive-sensor/.pio/build/${{ matrix.env }}/*.bin
+          if-no-files-found: warn
