@@ -13,7 +13,7 @@ const char * throttle_mode_names[] = {"RPM", "PWR", "SOG", "SOW", "RNG"};
 
 void update_throttle_value(int val){
   if(val < 0 || val > 255){
-    send_serial_dbg("Throttle value out of range", ERROR);
+    send_serial_dbg("Throttle value out of range", LOG_ERROR);
     return;
   }
   engine_state.throttle = (uint8_t)val;

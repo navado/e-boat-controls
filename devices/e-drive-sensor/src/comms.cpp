@@ -29,7 +29,7 @@ String bool_to_on_of(bool value){
 const char * log_level_str[5] = {"DEBUG","INFO","WARN","ERROR","NONE"};
 
 void send_serial_dbg(String msg,log_level_t level){
-  #if (LOG_LEVEL==DEBUG || LOG_LEVEL==INFO || LOG_LEVEL==WARN || LOG_LEVEL==ERROR)
+  #if (LOG_LEVEL < 4)   /* 4 = LOG_NONE */
     char _msg[128];
     sprintf(_msg, "ENDBG,lvl:%s,msg:%s",log_level_str[level], msg.c_str());
     send_msg(&Serial, _msg);
@@ -59,7 +59,7 @@ void send_msg(Print * p, const char * msg){
   p->print("$");
   // write to print in chunks of 32 bytes
   for(size_t i=0; i<strlen(msg); i+=32){
-    p->write(msg+i, min(32,strlen(msg)-i));
+    p->write(msg+i, min((size_t)32, strlen(msg)-i));
   }
   p->print("*");
   p->println(checksum, HEX);

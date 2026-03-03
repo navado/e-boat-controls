@@ -4,7 +4,12 @@
 #include <models.h>
 #include <buttons.h>
 #include <comms.h>
-#include <TimeInterrupt.h>
+#if defined(PANNEL_STM32)
+  #include <HardwareTimer.h>
+  static HardwareTimer _panelTimer(TIM2);
+#else
+  #include <TimeInterrupt.h>
+#endif
 
 void run_every_1s(){}
 void run_every_100ms(){
@@ -17,9 +22,15 @@ void setup() {
   digitalWrite(LED_BRD, HIGH);
   setup_buttons();
   setup_screen();
+#if defined(PANNEL_STM32)
+  _panelTimer.setOverflow(100000, MICROSEC_FORMAT);  // 100 ms
+  _panelTimer.attachInterrupt(run_every_100ms);
+  _panelTimer.resume();
+#else
   TimeInterrupt.begin(PRECISION);
   TimeInterrupt.addInterrupt(run_every_100ms,100);
   TimeInterrupt.addInterrupt(run_every_1s,1000);
+#endif
 }
 
 
@@ -125,10 +136,10 @@ void parse_serial_data(){
     checksum = msg_checksum(msg.c_str());
     long str_checksum_val = strtol(str_checksum.c_str(), NULL, 16);
     if(checksum != str_checksum_val){
-      #if LOG_LEVEL==DEBUG
+      #if (LOG_LEVEL == 0)   /* 0 = LOG_DEBUG */
        char _msg[128];
       snprintf(_msg, sizeof(_msg), "Checksum mismatch: %02X != %02X", checksum, (char)str_checksum_val);
-      send_serial_dbg(_msg,ERROR);
+      send_serial_dbg(_msg, LOG_ERROR);
       #endif
       return;
     }

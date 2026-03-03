@@ -30,11 +30,11 @@ void send_serial_field(
     String f_delim = ":");
 
 typedef enum{
-  DEBUG,
-  INFO,
-  WARN,
-  ERROR,
-  NONE
+  LOG_DEBUG,
+  LOG_INFO,
+  LOG_WARN,
+  LOG_ERROR,
+  LOG_NONE
 } log_level_t;
 extern const char * log_level_str[]; 
 void send_serial_dbg(String msg,log_level_t level);

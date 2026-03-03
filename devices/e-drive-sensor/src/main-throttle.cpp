@@ -299,7 +299,7 @@ static void handle_mode_encoder() {
     pid_reset(&pid_sog);
     pid_reset(&pid_sow);
     throttle_state.changed = 1;
-    send_serial_dbg(throttle_mode_names[throttle_state.mode], INFO);
+    send_serial_dbg(throttle_mode_names[throttle_state.mode], LOG_INFO);
   }
 
   // Button press: set throttle centre calibration (encoder mode)

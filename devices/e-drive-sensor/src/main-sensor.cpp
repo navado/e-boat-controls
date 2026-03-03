@@ -107,7 +107,7 @@ bool handle_command(String token){
   switch(cmd){
     case CMD_POWER:
       if(engine_state.power && engine_state.throttle > 1){
-       send_serial_dbg("Cannot force power off when engine is running", WARN);
+       send_serial_dbg("Cannot force power off when engine is running", LOG_WARN);
        break;
       }
       UPDATE_ON_OFF_FIELD(power, val);
@@ -115,7 +115,7 @@ bool handle_command(String token){
     case CMD_REVERSE:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        send_serial_dbg("Cannot force reverse when engine is running", WARN);
+        send_serial_dbg("Cannot force reverse when engine is running", LOG_WARN);
         break;
       } else if(engine_state.regen){
         send_serial_dbg("Cannot force reverse when regen is on",  WARN);
@@ -126,21 +126,21 @@ bool handle_command(String token){
     case CMD_REGEN:
       if(engine_state.power==0) break;
       if(engine_state.throttle > 1){
-        send_serial_dbg("Cannot force regen when engine is running", WARN);
+        send_serial_dbg("Cannot force regen when engine is running", LOG_WARN);
         break;
       } else if(engine_state.reverse){
-        send_serial_dbg("Cannot force regen when reverse is on", WARN);
+        send_serial_dbg("Cannot force regen when reverse is on", LOG_WARN);
         break;
       }
       UPDATE_ON_OFF_FIELD(regen, val);
       break;
     case CMD_THROTTLE:
       if(engine_state.power==0){
-        send_serial_dbg("Cannot set throttle when engine is off", WARN);
+        send_serial_dbg("Cannot set throttle when engine is off", LOG_WARN);
         break;
       }
       if(engine_state.regen){
-        send_serial_dbg("Cannot set throttle when regen is on", WARN);
+        send_serial_dbg("Cannot set throttle when regen is on", LOG_WARN);
         break;
       }
       tv = tok[1].toInt();
