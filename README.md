@@ -1,4 +1,4 @@
-# e-boat-pannel
+# Controls dor DYI electric boat
 
 [![CI](https://github.com/navado/e-boat-pannel/actions/workflows/ci.yml/badge.svg)](https://github.com/navado/e-boat-pannel/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
