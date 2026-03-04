@@ -77,8 +77,10 @@ static encoder_state_t thr_enc  = {0};
 #endif
 
 // ── Engine / panel buttons ────────────────────────────────────────────────────
-static btn_state_t btn_engine = {0};
-static btn_state_t btn_panel  = {0};
+static btn_state_t _btn_engine = {};
+static btn_state_t _btn_panel  = {};
+static btn_state_t * btn_engine = &_btn_engine;
+static btn_state_t * btn_panel  = &_btn_panel;
 
 // ── Timestamps ────────────────────────────────────────────────────────────────
 static unsigned long last_thrcmd_ms = 0;
@@ -445,10 +447,10 @@ static void parse_bus_data() {
 
 // ── Engine and panel buttons ──────────────────────────────────────────────────
 static void handle_engine_button() {
-  update_btn(&btn_engine, !digitalRead(BTN_ENGINE_PIN)); // active-low
-  if (BTN_PRESS(&btn_engine) && btn_engine.short_press == 0) {
-    btn_engine.short_press = 1;
-    btn_engine.ht = BTN_MILLS;
+  update_btn(btn_engine, !digitalRead(BTN_ENGINE_PIN)); // active-low
+  if (BTN_PRESS(btn_engine) && btn_engine->short_press == 0) {
+    btn_engine->short_press = 1;
+    btn_engine->ht = BTN_MILLS;
     if (!engine_state.power) {
       if (throttle_state.at_center) {
         engine_state.power = 1;
@@ -467,11 +469,11 @@ static void handle_engine_button() {
 }
 
 static void handle_panel_button() {
-  update_btn(&btn_panel, !digitalRead(BTN_PANEL_PIN));
+  update_btn(btn_panel, !digitalRead(BTN_PANEL_PIN));
   // Long-press to toggle panel power; interlock prevents off while engine runs
-  if (BTN_LONG_PRESS(&btn_panel) && btn_panel.long_press == 0) {
-    btn_panel.long_press = 1;
-    btn_panel.ht = BTN_MILLS;
+  if (BTN_LONG_PRESS(btn_panel) && btn_panel->long_press == 0) {
+    btn_panel->long_press = 1;
+    btn_panel->ht = BTN_MILLS;
     if (throttle_state.panel_on && engine_state.power) {
       buzzer_alert = BZR_ERROR; // interlock: cannot switch off while engine running
       return;

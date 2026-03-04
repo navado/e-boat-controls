@@ -27,10 +27,12 @@ void update_button_state(uint8_t index, uint8_t value){
 }
 
 void update_buttons(){
+#if !defined(THROTTLE_STM32)
   update_button_state(0, digitalRead(BTN_A));
   update_button_state(1, digitalRead(BTN_B));
   update_button_state(2, digitalRead(BTN_C));
   update_button_state(3, digitalRead(BTN_D));
+#endif
 }
 
 // ── Generic single-button update (for extra buttons not in buttons_state[]) ──
@@ -74,12 +76,13 @@ void update_encoder_btn(encoder_state_t * enc, uint8_t btn_pin) {
 }
 
 void setup_buttons(){
+#if !defined(THROTTLE_STM32)
   // Buttons
   pinMode(BTN_A, INPUT);
   pinMode(BTN_B, INPUT);
   pinMode(BTN_C, INPUT);
   pinMode(BTN_D, INPUT);
-
+#endif
 #if defined(PANNEL_STM32)
   attachInterrupt(BTN_A, [](){ // Throttle UP
     update_button_state(0, digitalRead(BTN_A));
