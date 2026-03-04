@@ -197,16 +197,32 @@ void handle_bus_serial() {
 
   } else if (hdr == "$" MSG_THR_INFO && n >= 7) {
     // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg[*CRC]
-    // Update water speed and GPS speed used for slip calculation
-    String sow_str = _bus_tokens[5];
-    int star = sow_str.indexOf('*');
-    if (star >= 0) sow_str = sow_str.substring(0, star);
-    engine_state.water_kn10 = (uint16_t)sow_str.toInt();
-    // Also update gps_state for throttle mode PID if running on sensor (unused here)
-    gps_state.sog_kn10 = (uint16_t)_bus_tokens[4].toInt();
-    gps_state.cog_deg  = (uint16_t)_bus_tokens[6].toInt();
-    gps_state.valid    = 1;
-    gps_state.sow_valid = (engine_state.water_kn10 > 0);
+    // Fallback: use GPS from THRINF only when no GPSRPT source is active
+    if (gps_arb.active == GPS_SRC_NONE) {
+      String sow_str = _bus_tokens[5];
+      int star = sow_str.indexOf('*');
+      if (star >= 0) sow_str = sow_str.substring(0, star);
+      engine_state.water_kn10  = (uint16_t)sow_str.toInt();
+      gps_state.sog_kn10       = (uint16_t)_bus_tokens[4].toInt();
+      gps_state.cog_deg        = (uint16_t)_bus_tokens[6].toInt();
+      gps_state.valid          = 1;
+      gps_state.sow_valid      = (engine_state.water_kn10 > 0);
+    }
+
+  } else if (hdr == "$" MSG_GPS_RPT) {
+    // GPSRPT — GPS broadcast from throttle or panel; sensor trusts and applies it
+    uint8_t src = GPS_SRC_NONE;
+    gps_state_t remote = {};
+    if (parse_gpsrpt(_bus_tokens, n, &src, &remote)) {
+      unsigned long now = millis();
+      if      (src == GPS_SRC_THROTTLE) gps_arb.last_T = now;
+      else if (src == GPS_SRC_PANEL)    gps_arb.last_P = now;
+      gps_arb_vote(&gps_arb, now);
+      if (gps_arb.active == src) {
+        gps_state                = remote;
+        engine_state.water_kn10  = remote.sow_kn10;
+      }
+    }
   }
 }
 

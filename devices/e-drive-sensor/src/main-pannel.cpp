@@ -11,12 +11,46 @@
   #include <TimeInterrupt.h>
 #endif
 
+// ── Optional NMEA 0183 GPS input on panel (USART3 PB11/PB10) ──────────────────
+// Enable with -D NMEA0183_PANEL build flag.
+// Panel then acts as GPS source on the internal bus via GPSRPT.
+#if defined(NMEA0183_PANEL) && defined(PANNEL_STM32)
+#include <HardwareSerial.h>
+HardwareSerial NmeaSerial(NMEA_PANEL_RX, NMEA_PANEL_TX); // USART3
+static String panel_nmea_buf;
+static unsigned long last_gpsrpt_ms = 0;
+
+static void read_panel_nmea() {
+  while (NmeaSerial.available()) {
+    char c = (char)NmeaSerial.read();
+    if (c == '\n') {
+      parse_nmea0183(panel_nmea_buf, &gps_state);
+      panel_nmea_buf = "";
+    } else if (c != '\r' && panel_nmea_buf.length() < 100) {
+      panel_nmea_buf += c;
+    }
+  }
+  // Broadcast GPS on internal bus at 1 Hz when we have a fix
+  unsigned long now = millis();
+  if ((gps_state.valid || gps_state.sow_valid) && (now - last_gpsrpt_ms >= 1000)) {
+    send_gpsrpt(&Serial, GPS_SRC_PANEL, &gps_state);
+    gps_arb.last_P = now;
+    last_gpsrpt_ms = now;
+  }
+}
+#else
+static inline void read_panel_nmea() {}
+#endif
+
 void run_every_1s(){}
 void run_every_100ms(){
   update_buttons();
 }
 void setup() {
   Serial.begin(115200);
+#if defined(NMEA0183_PANEL) && defined(PANNEL_STM32)
+  NmeaSerial.begin(9600);
+#endif
   // Prepare keepalive LED
   pinMode(LED_BRD, OUTPUT);
   digitalWrite(LED_BRD, HIGH);
@@ -165,12 +199,30 @@ void parse_serial_data(){
 
     } else if (parsed[0] == MSG_THR_INFO && num_tokens >= 7) {
       // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg
-      throttle_state.mode      = (throttle_mode_t)parsed[2].toInt();
+      throttle_state.mode       = (throttle_mode_t)parsed[2].toInt();
       throttle_state.target_val = (uint16_t)parsed[3].toInt();
-      gps_state.sog_kn10       = (uint16_t)parsed[4].toInt();
-      gps_state.sow_kn10       = (uint16_t)parsed[5].toInt();
-      gps_state.cog_deg        = (uint16_t)parsed[6].toInt();
-      gps_state.valid          = (gps_state.sog_kn10 > 0 || gps_state.cog_deg > 0);
+      // Only update GPS from THRINF when no dedicated GPSRPT source is active
+      if (gps_arb.active == GPS_SRC_NONE) {
+        gps_state.sog_kn10 = (uint16_t)parsed[4].toInt();
+        gps_state.sow_kn10 = (uint16_t)parsed[5].toInt();
+        gps_state.cog_deg  = (uint16_t)parsed[6].toInt();
+        gps_state.valid    = (gps_state.sog_kn10 > 0 || gps_state.cog_deg > 0);
+      }
+
+    } else if (parsed[0] == MSG_GPS_RPT) {
+      // GPSRPT — GPS broadcast from throttle or sensor
+      uint8_t src = GPS_SRC_NONE;
+      gps_state_t remote = {};
+      if (parse_gpsrpt(parsed, num_tokens, &src, &remote)) {
+        unsigned long now = millis();
+        if      (src == GPS_SRC_THROTTLE) gps_arb.last_T = now;
+        else if (src == GPS_SRC_SENSOR)   gps_arb.last_S = now;
+        gps_arb_vote(&gps_arb, now);
+#if !defined(NMEA0183_PANEL)
+        // Accept remote GPS if we don't have a local NMEA port
+        if (gps_arb.active == src) gps_state = remote;
+#endif
+      }
     }
   }
 }
@@ -190,6 +242,7 @@ void send_state(){
 void loop()
 {
   digitalWrite(LED_BRD, !digitalRead(LED_BRD));
+  read_panel_nmea();   // no-op unless NMEA0183_PANEL
   parse_serial_data();
   handle_throttle();
   handle_state();

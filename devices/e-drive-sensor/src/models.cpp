@@ -52,6 +52,20 @@ void pid_reset(pid_state_t * pid) {
   pid->prev_output = pid->output_min;
 }
 
+// ── GPS source arbitration ─────────────────────────────────────────────────────
+gps_arb_t gps_arb = {};
+
+uint8_t gps_arb_vote(gps_arb_t * a, unsigned long now_ms) {
+  bool okT = a->last_T && (now_ms - a->last_T) < GPS_SRC_TIMEOUT_MS;
+  bool okP = a->last_P && (now_ms - a->last_P) < GPS_SRC_TIMEOUT_MS;
+  bool okS = a->last_S && (now_ms - a->last_S) < GPS_SRC_TIMEOUT_MS;
+  if      (okT) a->active = GPS_SRC_THROTTLE;
+  else if (okP) a->active = GPS_SRC_PANEL;
+  else if (okS) a->active = GPS_SRC_SENSOR;
+  else          a->active = GPS_SRC_NONE;
+  return a->active;
+}
+
 // ── Propeller slip ────────────────────────────────────────────────────────────
 int16_t calc_prop_slip(uint16_t rpm, uint16_t sow_kn10, uint16_t pitch_mm) {
   if (rpm == 0 || pitch_mm == 0) return 0;

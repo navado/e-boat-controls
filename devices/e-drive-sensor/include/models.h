@@ -88,6 +88,33 @@ typedef struct {
 
 extern gps_state_t gps_state;
 
+// ── GPS source arbitration ─────────────────────────────────────────────────────
+// Any node with a physical NMEA0183 port broadcasts GPSRPT on the shared bus.
+// All nodes vote on the freshest / highest-priority source and detect disconnects.
+//
+// Priority (if multiple sources alive): Throttle ('T') > Panel ('P') > Sensor ('S')
+// NOTE: Sensor NMEA is not hardware-supported (Nano Timer1 conflicts SoftwareSerial).
+//       Sensor can receive GPS via GPSRPT from the bus but cannot originate it.
+//
+// A source is stale after GPS_SRC_TIMEOUT_MS ms of silence.
+#define GPS_SRC_NONE     0
+#define GPS_SRC_THROTTLE 'T'
+#define GPS_SRC_PANEL    'P'
+#define GPS_SRC_SENSOR   'S'
+#define GPS_SRC_TIMEOUT_MS  5000UL
+
+typedef struct {
+  unsigned long last_T;  // millis() of last GPSRPT from throttle
+  unsigned long last_P;  // millis() of last GPSRPT from panel
+  unsigned long last_S;  // millis() of last GPSRPT from sensor
+  uint8_t active;        // current winner: GPS_SRC_* or GPS_SRC_NONE
+} gps_arb_t;
+
+extern gps_arb_t gps_arb;
+
+// Re-evaluate the active GPS source.  Call periodically; returns new active value.
+uint8_t gps_arb_vote(gps_arb_t * a, unsigned long now_ms);
+
 // ── Throttle device state ─────────────────────────────────────────────────────
 typedef struct {
   throttle_mode_t mode;

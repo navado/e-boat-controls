@@ -87,10 +87,11 @@ static btn_state_t * btn_engine = &_btn_engine;
 static btn_state_t * btn_panel  = &_btn_panel;
 
 // ── Timestamps ────────────────────────────────────────────────────────────────
-static unsigned long last_thrcmd_ms = 0;
-static unsigned long last_thrinf_ms = 0;
-static unsigned long last_eninf_ms  = 0;
-static unsigned long last_pid_ms    = 0;
+static unsigned long last_thrcmd_ms    = 0;
+static unsigned long last_thrinf_ms    = 0;
+static unsigned long last_eninf_ms     = 0;
+static unsigned long last_pid_ms       = 0;
+static unsigned long last_motor_out_ms = 0; // motor NMEA0183 + N2K output rate
 
 // ── LED state ─────────────────────────────────────────────────────────────────
 static uint8_t  led_r = 0, led_g = 0, led_b = 0;
@@ -317,53 +318,23 @@ static void handle_mode_encoder() {
   }
 }
 
-// ── NMEA 0183 parser ──────────────────────────────────────────────────────────
+// ── NMEA 0183 GPS input (Serial2 RX, PA3) ─────────────────────────────────────
+// Enabled when NMEA0183_THROTTLE is defined (default unless another node has NMEA).
+// Serial2 TX (PA2) always outputs motor sentences regardless of this flag.
 static String nmea_buf;
 
-static void parse_nmea_sentence(String & s) {
-  int star = s.indexOf('*');
-  if (star < 1 || s[0] != '$') return;
-  String body = s.substring(1, star); // body between '$' and '*'
-  char calc_cs = msg_checksum(body.c_str());
-  long rx_cs   = strtol(s.substring(star + 1).c_str(), NULL, 16);
-  if (calc_cs != (char)rx_cs) return;
-
-  String tok[16];
-  uint8_t n = tokenize(body, ',', tok, 16);
-  if (n < 2) return;
-
-  if (tok[0] == "GPRMC" || tok[0] == "GNRMC") {
-    if (n >= 9 && tok[2] == "A") {
-      gps_state.valid     = 1;
-      gps_state.sog_kn10  = (uint16_t)(tok[7].toFloat() * 10.0f);
-      gps_state.cog_deg   = (uint16_t)tok[8].toFloat();
-    } else {
-      gps_state.valid = 0;
-    }
-  } else if (tok[0] == "GPVTG" || tok[0] == "GNVTG") {
-    if (n >= 6) {
-      gps_state.sog_kn10 = (uint16_t)(tok[5].toFloat() * 10.0f);
-      gps_state.valid    = 1;
-    }
-  } else if (tok[0] == "VHW") {
-    // $VHW,<hdg_T>,T,<hdg_M>,M,<sow_kn>,N,<sow_kmh>,K*cs
-    if (n >= 6) {
-      gps_state.sow_kn10  = (uint16_t)(tok[5].toFloat() * 10.0f);
-      gps_state.sow_valid = 1;
-    }
-  }
-}
-
 static void read_nmea_gps() {
+#if defined(NMEA0183_THROTTLE)
   while (Serial2.available()) {
     char c = (char)Serial2.read();
     if (c == '\n') {
-      parse_nmea_sentence(nmea_buf);
+      parse_nmea0183(nmea_buf, &gps_state); // updates gps_state; broadcast deferred to THRINF tick
       nmea_buf = "";
     } else if (c != '\r' && nmea_buf.length() < 100) {
       nmea_buf += c;
     }
   }
+#endif
 }
 
 // ── NMEA 2000 (CAN bus) ───────────────────────────────────────────────────────
@@ -371,11 +342,10 @@ static void read_nmea_gps() {
 // and the NMEA2000 + NMEA2000_stm32 libraries.
 // Enable with -D NMEA2000 build flag.
 //
-// Relevant PGNs:
-//   128259 (0x1F503)  Speed Through Water  — field: Speed (0.01 m/s units)
-//   129026 (0x1F802)  COG & SOG Rapid      — fields: COG, SOG (0.0001 rad/s and 0.01 m/s)
-//
-// Implementation stub — wire up library calls here when CAN hardware is fitted.
+// Receives:  PGN 128259 — Speed Through Water
+//            PGN 129026 — COG & SOG Rapid Update
+// Transmits: PGN 127488 — Engine Parameters Rapid Update (RPM)
+//            PGN 127508 — Battery Status (voltage, current)
 #if defined(NMEA2000)
 #include <NMEA2000_CAN.h>   // platform CAN driver
 #include <N2kMessages.h>
@@ -404,7 +374,24 @@ static void nmea2000_msg_handler(const tN2kMsg & msg) {
   }
 }
 
+// Transmit motor telemetry PGNs (call at ~1 Hz).
+static void send_motor_n2k() {
+  if (last_eninf_ms == 0) return; // no sensor data yet
+  tN2kMsg msg;
+  // PGN 127488 — Engine Parameters Rapid Update (instance 0 = port/only engine)
+  SetN2kEngineParamRapid(msg, 0, (double)engine_state.rpm);
+  NMEA2000.SendMsg(msg);
+  // PGN 127508 — Battery Status (instance 0 = main 48 V bus)
+  SetN2kBatStatus(msg, 0,
+    (double)engine_state.vcc48v  / 1000.0,  // mV → V
+    (double)engine_state.curr_ma / 1000.0); // mA → A
+  NMEA2000.SendMsg(msg);
+}
+
 static void setup_nmea2000() {
+  NMEA2000.SetProductInformation("00000001", 100, "e-boat-throttle", "1.0", "1.0");
+  NMEA2000.SetDeviceInformation(1, 50, 20, 2048); // unique, function, class, manufacturer
+  NMEA2000.SetMode(tNMEA2000::N2km_ListenAndNode, 22);
   NMEA2000.SetMsgHandler(nmea2000_msg_handler);
   NMEA2000.Open();
 }
@@ -413,11 +400,12 @@ static void read_nmea2000() {
   NMEA2000.ParseMessages();
 }
 #else
-static inline void setup_nmea2000() {}
-static inline void read_nmea2000()  {}
+static inline void setup_nmea2000()  {}
+static inline void read_nmea2000()   {}
+static inline void send_motor_n2k()  {}
 #endif // NMEA2000
 
-// ── Bus ENINF parser ──────────────────────────────────────────────────────────
+// ── Bus message parser ────────────────────────────────────────────────────────
 static void parse_bus_data() {
   if (!Serial.available()) return;
   String data = Serial.readStringUntil('\n');
@@ -432,21 +420,39 @@ static void parse_bus_data() {
 
   String parsed[MAX_TOKENS];
   uint8_t n = tokenize(msg, ',', parsed, MAX_TOKENS);
-  if (n < 9 || parsed[0] != MSG_ENG_INFO) return;
+  if (n < 2) return;
 
-  engine_state.T          = parsed[1].toInt();
-  engine_state.rpm        = parsed[2].toInt();
-  engine_state.power      = parsed[3].toInt();
-  engine_state.reverse    = parsed[4].toInt();
-  engine_state.regen      = parsed[5].toInt();
-  engine_state.throttle   = parsed[6].toInt();
-  engine_state.throttle_val = parsed[7].toInt();
-  engine_state.vcc48v     = (uint16_t)parsed[8].toInt();
-  if (n >= 10) engine_state.curr_ma       = (uint16_t)parsed[9].toInt();
-  if (n >= 11) engine_state.power_w       = (uint16_t)parsed[10].toInt();
-  if (n >= 12) engine_state.water_kn10   = (uint16_t)parsed[11].toInt();
-  if (n >= 13) engine_state.prop_slip_pct10 = (int16_t)parsed[12].toInt();
-  last_eninf_ms = millis();
+  if (parsed[0] == MSG_ENG_INFO && n >= 9) {
+    // ENINF — engine telemetry from sensor
+    engine_state.T          = parsed[1].toInt();
+    engine_state.rpm        = parsed[2].toInt();
+    engine_state.power      = parsed[3].toInt();
+    engine_state.reverse    = parsed[4].toInt();
+    engine_state.regen      = parsed[5].toInt();
+    engine_state.throttle   = parsed[6].toInt();
+    engine_state.throttle_val = parsed[7].toInt();
+    engine_state.vcc48v     = (uint16_t)parsed[8].toInt();
+    if (n >= 10) engine_state.curr_ma         = (uint16_t)parsed[9].toInt();
+    if (n >= 11) engine_state.power_w         = (uint16_t)parsed[10].toInt();
+    if (n >= 12) engine_state.water_kn10      = (uint16_t)parsed[11].toInt();
+    if (n >= 13) engine_state.prop_slip_pct10 = (int16_t)parsed[12].toInt();
+    last_eninf_ms = millis();
+
+  } else if (parsed[0] == MSG_GPS_RPT) {
+    // GPSRPT — GPS broadcast from another node (panel or sensor)
+    uint8_t src = GPS_SRC_NONE;
+    gps_state_t remote = {};
+    if (parse_gpsrpt(parsed, n, &src, &remote)) {
+      unsigned long now = millis();
+      if      (src == GPS_SRC_PANEL)  gps_arb.last_P = now;
+      else if (src == GPS_SRC_SENSOR) gps_arb.last_S = now;
+      gps_arb_vote(&gps_arb, now);
+#if !defined(NMEA0183_THROTTLE)
+      // No local NMEA: accept GPS data from the active remote source
+      if (gps_arb.active == src) gps_state = remote;
+#endif
+    }
+  }
 }
 
 // ── Engine and panel buttons ──────────────────────────────────────────────────
@@ -508,18 +514,27 @@ static void send_thrcmd() {
 }
 
 static void send_thrinf() {
+  unsigned long now = millis();
   char _msg[128];
   snprintf(_msg, sizeof(_msg),
     "%s,%lu,%u,%u,%u,%u,%u",
-    MSG_THR_INFO,
-    millis(),
+    MSG_THR_INFO, now,
     (uint8_t)throttle_state.mode,
     throttle_state.target_val,
     gps_state.sog_kn10,
     gps_state.sow_kn10,
     gps_state.cog_deg);
   send_msg(&Serial, _msg);
-  last_thrinf_ms = millis();
+
+  // Broadcast GPS on internal bus so panel/sensor can use it if throttle has NMEA
+#if defined(NMEA0183_THROTTLE)
+  if (gps_state.valid || gps_state.sow_valid) {
+    send_gpsrpt(&Serial, GPS_SRC_THROTTLE, &gps_state);
+    gps_arb.last_T = now;
+  }
+#endif
+
+  last_thrinf_ms = now;
 }
 
 // ── Arduino setup / loop ──────────────────────────────────────────────────────
@@ -592,7 +607,16 @@ void loop() {
     send_thrinf();
   }
 
-  // 9. LED and buzzer
+  // 9. Motor telemetry output — NMEA 0183 (Serial2 TX) and NMEA 2000 (CAN) at 1 Hz
+  if (now - last_motor_out_ms >= 1000) {
+    send_nmea0183_rpm(&Serial2, engine_state.rpm);
+    send_nmea0183_xdr(&Serial2, engine_state.vcc48v, engine_state.curr_ma, engine_state.power_w);
+    send_motor_n2k();
+    gps_arb_vote(&gps_arb, now); // periodic source staleness check
+    last_motor_out_ms = now;
+  }
+
+  // 10. LED and buzzer
   update_led_state();
   led_update();
   update_buzzer_alert();

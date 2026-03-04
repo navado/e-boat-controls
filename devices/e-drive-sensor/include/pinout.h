@@ -27,6 +27,9 @@
 #define CURR_MV_PER_AMP   50
 #elif defined(PANNEL_STM32)
 // Bluepill based board
+// Serial  (USART1 PA9/PA10) : shared bus (sensor + panel + throttle)
+// Serial3 (USART3 PB10/PB11): optional NMEA 0183 GPS input (enable -D NMEA0183_PANEL)
+//   NOTE: PA2/PA3 are used by LCD (SDO/BACKLIGHT), so USART3 is used instead.
 #define LED_BRD PC_13          // C13 LED on board
 #define CS_PIN PC_14
 #define RST_PIN PC_15
@@ -39,6 +42,12 @@
 #define BTN_C B1
 #define BTN_B B10
 #define BTN_A B11
+
+#if defined(NMEA0183_PANEL)
+// NMEA 0183 GPS input on panel STM32 (USART3 — PA2/PA3 occupied by LCD)
+#define NMEA_PANEL_RX  PB11   // USART3_RX
+#define NMEA_PANEL_TX  PB10   // USART3_TX (TX not needed for GPS receive only)
+#endif
 #elif defined(PANNEL_NANO)
 // Arduino Nano based board
 #define LED_BRD         13
@@ -84,9 +93,17 @@
 // Buzzer (passive, driven with tone() or analogWrite)
 #define BUZZER_PIN      PA8   // TIM1_CH1
 
+// NMEA 0183 GPS/chart-plotter port (Serial2 = USART2, PA2=TX, PA3=RX)
+// RX receives GPS NMEA sentences (enable with -D NMEA0183_THROTTLE).
+// TX transmits motor NMEA sentences ($IIRPM, $IIXDR) always when THROTTLE_STM32.
+// Default: NMEA0183_THROTTLE is on unless another node's NMEA flag is active.
+#if !defined(NMEA0183_PANEL)
+#  define NMEA0183_THROTTLE   // throttle reads GPS on Serial2 RX by default
+#endif
+
 // NMEA 2000 CAN bus (requires external SN65HVD230 or equivalent transceiver)
-// PGN 128259 (0x1F503) — Speed Through Water
-// PGN 129026 (0x1F802) — COG & SOG, Rapid Update
+// Receives:  PGN 128259 — Speed Through Water, PGN 129026 — COG & SOG Rapid
+// Transmits: PGN 127488 — Engine Parameters Rapid, PGN 127508 — Battery Status
 // Enable with -D NMEA2000 build flag
 #define NMEA2000_CAN_RX  PA11  // CAN_RX (remapped)
 #define NMEA2000_CAN_TX  PA12  // CAN_TX (remapped)
