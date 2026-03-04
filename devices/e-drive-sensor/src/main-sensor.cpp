@@ -118,7 +118,7 @@ bool handle_command(String token){
         send_serial_dbg("Cannot force reverse when engine is running", LOG_WARN);
         break;
       } else if(engine_state.regen){
-        send_serial_dbg("Cannot force reverse when regen is on",  WARN);
+        send_serial_dbg("Cannot force reverse when regen is on", LOG_WARN);
         break;
       }
       UPDATE_ON_OFF_FIELD(reverse, val);
