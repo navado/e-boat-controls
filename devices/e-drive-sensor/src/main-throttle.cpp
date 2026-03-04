@@ -39,11 +39,15 @@
 #if defined(THROTTLE_STM32)
 
 #include <Arduino.h>
+#include <HardwareSerial.h>
 #include "pinout.h"
 #include "models.h"
 #include "comms.h"
 #include "buttons.h"
 #include <TimerInterrupt_Generic.h>
+
+// USART2 (PA2=TX, PA3=RX) — not pre-instantiated by the BluePill variant
+HardwareSerial Serial2(PA3, PA2);
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 #define MAX_RPM           5000   // Rated max RPM
