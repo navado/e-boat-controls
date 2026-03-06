@@ -24,6 +24,8 @@ enum cmd_t {
 #define MSG_GPS_RPT   "GPSRPT"  // Any node → all    : GPS broadcast for source arbitration
 //   Format: $GPSRPT,src:<T|P|S>,sog:<kn10>,cog:<deg>,sow:<kn10>,valid:<0-3>*XX
 //   valid bitmask: bit0 = GPS fix valid, bit1 = water-speed valid
+#define MSG_PAN_MODE  "PANMOD"  // Panel → throttle  : mode-selector control
+//   Format: $PANMOD,mode:<0-4>*XX  — panel long-press cycles throttle control mode
 
 void send_serial_field(
     Print * p,

@@ -28,10 +28,11 @@ String bool_to_on_of(bool value){
 
 const char * log_level_str[5] = {"DEBUG","INFO","WARN","ERROR","NONE"};
 
-void send_serial_dbg(String msg,log_level_t level){
-  #if (LOG_LEVEL < 4)   /* 4 = LOG_NONE */
+void send_serial_dbg(String msg, log_level_t level){
+  #if (LOG_LEVEL < 4)   /* 4 = LOG_NONE; lower = more verbose */
+    if ((int)level < LOG_LEVEL) return;  // skip if below compile-time threshold
     char _msg[128];
-    sprintf(_msg, "ENDBG,lvl:%s,msg:%s",log_level_str[level], msg.c_str());
+    snprintf(_msg, sizeof(_msg), "ENDBG,lvl:%s,msg:%s", log_level_str[level], msg.c_str());
     send_msg(&Serial, _msg);
   #else
     (void)msg; (void)level;

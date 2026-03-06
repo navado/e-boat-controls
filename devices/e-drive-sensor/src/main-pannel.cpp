@@ -56,6 +56,7 @@ void setup() {
   digitalWrite(LED_BRD, HIGH);
   setup_buttons();
   setup_screen();
+  send_serial_dbg("PANEL READY", LOG_INFO);
 #if defined(PANNEL_STM32)
   _panelTimer.setOverflow(100000, MICROSEC_FORMAT);  // 100 ms
   _panelTimer.attachInterrupt(run_every_100ms);
@@ -68,6 +69,16 @@ void setup() {
 }
 
 
+// ── Panel-local mode state (mirrors throttle_state.mode on THRINF receipt) ────
+static throttle_mode_t panel_mode = MODE_RPM;
+
+static void send_panmod() {
+  char _msg[32];
+  snprintf(_msg, sizeof(_msg), "%s,mode:%u", MSG_PAN_MODE, (uint8_t)panel_mode);
+  send_msg(&Serial, _msg);
+  send_serial_dbg(String("mode->") + throttle_mode_names[panel_mode], LOG_INFO);
+}
+
 void handle_throttle(){
 
   if (btn_a->state == btn_b->state)
@@ -76,6 +87,7 @@ void handle_throttle(){
   if (panel_state.power == 0 || panel_state.regen == 1)
     return;
 
+  // Short press A: throttle / target step up
   if (BTN_PRESS(btn_a) && btn_a->short_press == 0){
     btn_a->short_press = 1;
     btn_a->ht = BTN_MILLS;
@@ -83,19 +95,15 @@ void handle_throttle(){
     PANEL_STATE_SET_CHANGED();
   }
 
-  if(BTN_LONG_PRESS(btn_a) && btn_a->long_press == 0){
+  // Long press A: cycle control mode forward (RPM→PWR→SOG→SOW→RNG→RPM)
+  if (BTN_LONG_PRESS(btn_a) && btn_a->long_press == 0){
     btn_a->long_press = 1;
     btn_a->ht = BTN_MILLS;
-    if(panel_state.speed > SPD_NEUTRAL) { // Forward to faster
-      panel_state.speed = min(panel_state.speed + 4, THROTTLE_TABLE_SIZE - 1);
-    } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Forward
-      panel_state.speed = min(SPD_NEUTRAL + 4, THROTTLE_TABLE_SIZE - 1);
-    } else { // Reverse to Neutral
-      panel_state.speed = SPD_NEUTRAL;
-    }
-    PANEL_STATE_SET_CHANGED();
+    panel_mode = (throttle_mode_t)(((uint8_t)panel_mode + 1) % (uint8_t)MODE_COUNT);
+    send_panmod();
   }
 
+  // Short press B: throttle / target step down
   if (BTN_PRESS(btn_b) && btn_b->short_press == 0){
     btn_b->short_press = 1;
     btn_b->ht = BTN_MILLS;
@@ -103,37 +111,38 @@ void handle_throttle(){
     PANEL_STATE_SET_CHANGED();
   }
 
+  // Long press B: cycle control mode backward (RPM←PWR←SOG←SOW←RNG←RPM)
   if (BTN_LONG_PRESS(btn_b) && btn_b->long_press == 0){
     btn_b->long_press = 1;
     btn_b->ht = BTN_MILLS;
-    if(panel_state.speed > SPD_NEUTRAL) { // Forward to Neutral
-      panel_state.speed = max(panel_state.speed - 4, SPD_NEUTRAL);
-    } else if (panel_state.speed == SPD_NEUTRAL){ // Neutral to Reverse
-      panel_state.speed = max(SPD_NEUTRAL - 4, 0);
-    } else { // Reverse to faster
-      panel_state.speed = 0;
-    }
-    PANEL_STATE_SET_CHANGED();
+    panel_mode = (throttle_mode_t)(
+      ((uint8_t)panel_mode + (uint8_t)MODE_COUNT - 1) % (uint8_t)MODE_COUNT);
+    send_panmod();
   }
 }
 
 void handle_state(){
   if (btn_c->state==btn_d->state) return;
-  
-  if (BTN_PRESS(btn_c) && btn_c->short_press ==0 && panel_state.regen == 0 && panel_state.speed == SPD_NEUTRAL){
+
+  // BTN_C short: toggle engine power (guard: neutral speed, regen off)
+  if (BTN_PRESS(btn_c) && btn_c->short_press == 0
+      && panel_state.regen == 0 && panel_state.speed == SPD_NEUTRAL){
     btn_c->short_press = 1;
     btn_c->ht = BTN_MILLS;
     panel_state.power = !panel_state.power;
-    if (panel_state.power == 0){
-      panel_state.speed = SPD_NEUTRAL;
-    }
+    if (panel_state.power == 0) panel_state.speed = SPD_NEUTRAL;
     PANEL_STATE_SET_CHANGED();
+    send_serial_dbg(panel_state.power ? "PANEL: power ON" : "PANEL: power OFF", LOG_INFO);
   }
-  if (BTN_PRESS(btn_d) && btn_d->short_press ==0 && panel_state.power == 1 && panel_state.speed == SPD_NEUTRAL){
+
+  // BTN_D short: toggle regen (guard: power on, neutral speed)
+  if (BTN_PRESS(btn_d) && btn_d->short_press == 0
+      && panel_state.power == 1 && panel_state.speed == SPD_NEUTRAL){
     btn_d->short_press = 1;
     btn_d->ht = BTN_MILLS;
     panel_state.regen = !panel_state.regen;
     PANEL_STATE_SET_CHANGED();
+    send_serial_dbg(panel_state.regen ? "PANEL: regen ON" : "PANEL: regen OFF", LOG_INFO);
   }
 }
 
@@ -198,10 +207,10 @@ void parse_serial_data(){
       engine_state.changed = 1;
 
     } else if (parsed[0] == MSG_THR_INFO && num_tokens >= 7) {
-      // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg
+      // THRINF,T,mode,target,sog_kn10,sow_kn10,cog_deg — sync panel_mode from throttle
       throttle_state.mode       = (throttle_mode_t)parsed[2].toInt();
       throttle_state.target_val = (uint16_t)parsed[3].toInt();
-      // Only update GPS from THRINF when no dedicated GPSRPT source is active
+      panel_mode = throttle_state.mode; // keep panel mode in sync
       if (gps_arb.active == GPS_SRC_NONE) {
         gps_state.sog_kn10 = (uint16_t)parsed[4].toInt();
         gps_state.sow_kn10 = (uint16_t)parsed[5].toInt();
@@ -211,6 +220,7 @@ void parse_serial_data(){
 
     } else if (parsed[0] == MSG_GPS_RPT) {
       // GPSRPT — GPS broadcast from throttle or sensor
+      uint8_t prev_active = gps_arb.active;
       uint8_t src = GPS_SRC_NONE;
       gps_state_t remote = {};
       if (parse_gpsrpt(parsed, num_tokens, &src, &remote)) {
@@ -218,8 +228,14 @@ void parse_serial_data(){
         if      (src == GPS_SRC_THROTTLE) gps_arb.last_T = now;
         else if (src == GPS_SRC_SENSOR)   gps_arb.last_S = now;
         gps_arb_vote(&gps_arb, now);
+        if (gps_arb.active != prev_active) {
+          char buf[40];
+          snprintf(buf, sizeof(buf), "GPS src: %c->%c",
+            prev_active ? (char)prev_active : '-',
+            gps_arb.active ? (char)gps_arb.active : '-');
+          send_serial_dbg(buf, LOG_WARN);
+        }
 #if !defined(NMEA0183_PANEL)
-        // Accept remote GPS if we don't have a local NMEA port
         if (gps_arb.active == src) gps_state = remote;
 #endif
       }
@@ -228,12 +244,14 @@ void parse_serial_data(){
 }
 
 void send_state(){
+  // ENCMD carries mode so the sensor can forward it to the throttle device if present
   char _msg[128];
-  snprintf(_msg, sizeof(_msg), "ENCMD,pow:%s,rev:%s,reg:%s,thr:%d",
+  snprintf(_msg, sizeof(_msg), "ENCMD,pow:%s,rev:%s,reg:%s,thr:%d,mode:%u",
     bool_to_on_of(panel_state.power).c_str(),
     bool_to_on_of(panel_state.speed < SPD_NEUTRAL).c_str(),
     bool_to_on_of(panel_state.regen).c_str(),
-    throttle_table[panel_state.speed]
+    throttle_table[panel_state.speed],
+    (uint8_t)panel_mode
   );
   send_msg(&Serial, _msg);
   panel_state.changed = 0;

@@ -37,6 +37,10 @@ void run_every_1s(){
   // Propeller slip (requires water speed from THRINF)
   engine_state.prop_slip_pct10 = calc_prop_slip(
     engine_state.rpm, engine_state.water_kn10, PROP_PITCH_MM);
+
+  // Low-voltage warning (42V threshold on 48V nominal battery)
+  if (engine_state.vcc48v > 0 && engine_state.vcc48v < 42000)
+    send_serial_dbg("LOW VOLTAGE", LOG_WARN);
 }
 
 void run_every_100ms(){
@@ -92,6 +96,7 @@ void setup() {
   set_state();
   char msg[] = "ENINF,st:STARTED";
   send_msg(&Serial, msg);
+  send_serial_dbg("SENSOR READY", LOG_INFO);
 }
 
 
@@ -111,6 +116,7 @@ bool handle_command(String token){
        break;
       }
       UPDATE_ON_OFF_FIELD(power, val);
+      send_serial_dbg(engine_state.power ? "SENSOR: power ON" : "SENSOR: power OFF", LOG_INFO);
       break;
     case CMD_REVERSE:
       if(engine_state.power==0) break;
@@ -214,10 +220,18 @@ void handle_bus_serial() {
     uint8_t src = GPS_SRC_NONE;
     gps_state_t remote = {};
     if (parse_gpsrpt(_bus_tokens, n, &src, &remote)) {
+      uint8_t prev_active = gps_arb.active;
       unsigned long now = millis();
       if      (src == GPS_SRC_THROTTLE) gps_arb.last_T = now;
       else if (src == GPS_SRC_PANEL)    gps_arb.last_P = now;
       gps_arb_vote(&gps_arb, now);
+      if (gps_arb.active != prev_active) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "GPS src: %c->%c",
+          prev_active ? (char)prev_active : '-',
+          gps_arb.active ? (char)gps_arb.active : '-');
+        send_serial_dbg(buf, LOG_WARN);
+      }
       if (gps_arb.active == src) {
         gps_state                = remote;
         engine_state.water_kn10  = remote.sow_kn10;

@@ -92,6 +92,10 @@ static unsigned long last_thrinf_ms    = 0;
 static unsigned long last_eninf_ms     = 0;
 static unsigned long last_pid_ms       = 0;
 static unsigned long last_motor_out_ms = 0; // motor NMEA0183 + N2K output rate
+// last GPS data received via NMEA 2000 CAN (used for N2K→N0183 failover)
+#if defined(NMEA2000)
+static unsigned long last_n2k_nav_ms   = 0;
+#endif
 
 // ── LED state ─────────────────────────────────────────────────────────────────
 static uint8_t  led_r = 0, led_g = 0, led_b = 0;
@@ -325,16 +329,32 @@ static String nmea_buf;
 
 static void read_nmea_gps() {
 #if defined(NMEA0183_THROTTLE)
+#if defined(NMEA2000)
+  // N2K has priority over NMEA0183: skip Serial2 RX while CAN is providing nav data.
+  // When N2K goes silent (> GPS_SRC_TIMEOUT_MS) NMEA0183 takes over automatically.
+  {
+    bool n2k_active = last_n2k_nav_ms && (millis() - last_n2k_nav_ms < GPS_SRC_TIMEOUT_MS);
+    static bool s_n2k_prev = false;
+    if (n2k_active != s_n2k_prev) {
+      send_serial_dbg(
+        n2k_active ? "GPS: N2K primary, N0183 standby"
+                   : "GPS: N2K lost, N0183 active",
+        LOG_WARN);
+      s_n2k_prev = n2k_active;
+    }
+    if (n2k_active) return;
+  }
+#endif // NMEA2000
   while (Serial2.available()) {
     char c = (char)Serial2.read();
     if (c == '\n') {
-      parse_nmea0183(nmea_buf, &gps_state); // updates gps_state; broadcast deferred to THRINF tick
+      parse_nmea0183(nmea_buf, &gps_state);
       nmea_buf = "";
     } else if (c != '\r' && nmea_buf.length() < 100) {
       nmea_buf += c;
     }
   }
-#endif
+#endif // NMEA0183_THROTTLE
 }
 
 // ── NMEA 2000 (CAN bus) ───────────────────────────────────────────────────────
@@ -355,18 +375,19 @@ static void nmea2000_msg_handler(const tN2kMsg & msg) {
     case 128259: { // Speed Through Water
       double sow_ms;
       if (ParseN2kBoatSpeed(msg, sow_ms)) {
-        // 1 m/s = 19.438 kn*10
-        gps_state.sow_kn10  = (uint16_t)(sow_ms * 19.438f);
+        gps_state.sow_kn10  = (uint16_t)(sow_ms * 19.438f); // m/s → kn*10
         gps_state.sow_valid = 1;
+        last_n2k_nav_ms = millis();
       }
       break;
     }
-    case 129026: { // COG & SOG Rapid
+    case 129026: { // COG & SOG Rapid Update
       uint8_t sid; tN2kHeadingReference ref; double cog_rad, sog_ms;
       if (ParseN2kCOGSOGRapid(msg, sid, ref, cog_rad, sog_ms)) {
         gps_state.sog_kn10 = (uint16_t)(sog_ms * 19.438f);
         gps_state.cog_deg  = (uint16_t)(cog_rad * 180.0f / PI);
         gps_state.valid    = 1;
+        last_n2k_nav_ms = millis();
       }
       break;
     }
@@ -439,7 +460,8 @@ static void parse_bus_data() {
     last_eninf_ms = millis();
 
   } else if (parsed[0] == MSG_GPS_RPT) {
-    // GPSRPT — GPS broadcast from another node (panel or sensor)
+    // GPSRPT — GPS broadcast from panel or sensor
+    uint8_t prev_active = gps_arb.active;
     uint8_t src = GPS_SRC_NONE;
     gps_state_t remote = {};
     if (parse_gpsrpt(parsed, n, &src, &remote)) {
@@ -447,10 +469,33 @@ static void parse_bus_data() {
       if      (src == GPS_SRC_PANEL)  gps_arb.last_P = now;
       else if (src == GPS_SRC_SENSOR) gps_arb.last_S = now;
       gps_arb_vote(&gps_arb, now);
+      if (gps_arb.active != prev_active) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "GPS src: %c->%c",
+          prev_active ? (char)prev_active : '-',
+          gps_arb.active ? (char)gps_arb.active : '-');
+        send_serial_dbg(buf, LOG_WARN);
+      }
 #if !defined(NMEA0183_THROTTLE)
-      // No local NMEA: accept GPS data from the active remote source
       if (gps_arb.active == src) gps_state = remote;
 #endif
+    }
+
+  } else if (parsed[0] == MSG_PAN_MODE && n >= 2) {
+    // PANMOD — panel long-press requests mode change
+    String kv[2];
+    if (tokenize(parsed[1], ':', kv, 2) == 2 && kv[0] == "mode") {
+      uint8_t new_mode = (uint8_t)kv[1].toInt();
+      if (new_mode < (uint8_t)MODE_COUNT &&
+          (throttle_mode_t)new_mode != throttle_state.mode) {
+        throttle_state.mode = (throttle_mode_t)new_mode;
+        pid_reset(&pid_rpm);   pid_reset(&pid_power);
+        pid_reset(&pid_sog);   pid_reset(&pid_sow);
+        throttle_state.changed = 1;
+        send_serial_dbg(
+          String("mode->") + throttle_mode_names[throttle_state.mode],
+          LOG_INFO);
+      }
     }
   }
 }
@@ -465,14 +510,16 @@ static void handle_engine_button() {
       if (throttle_state.at_center) {
         engine_state.power = 1;
         throttle_state.changed = 1;
+        send_serial_dbg("ENGINE ON", LOG_INFO);
       } else {
-        // Throttle not at centre: warn and refuse
         buzzer_alert = BZR_ERROR;
+        send_serial_dbg("ENGINE ON blocked: throttle not centred", LOG_WARN);
       }
     } else {
       if (throttle_state.at_center) {
         engine_state.power = 0;
         throttle_state.changed = 1;
+        send_serial_dbg("ENGINE OFF", LOG_INFO);
       }
     }
   }
@@ -572,6 +619,7 @@ void setup() {
   last_pid_ms = millis();
   char msg[] = MSG_THR_INFO ",0,0,0,0,0,0";
   send_msg(&Serial, msg);
+  send_serial_dbg("THROTTLE READY", LOG_INFO);
 }
 
 void loop() {
