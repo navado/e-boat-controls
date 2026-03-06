@@ -25,7 +25,7 @@ SerialStub Serial;
 // ── setUp / tearDown ─────────────────────────────────────────────────────────
 void setUp(void) {
   // Reset engine state before each test (cast away volatile for re-initialization)
-  engine_state_t zero = {0};
+  engine_state_t zero = {};
   *(engine_state_t*)&engine_state = zero;
 }
 void tearDown(void) {}
@@ -248,6 +248,176 @@ void test_throttle_table_max_forward_gt_reverse(void) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// throttle_mode_t — enum sanity
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_throttle_mode_values(void) {
+  TEST_ASSERT_EQUAL(0, (int)MODE_RPM);
+  TEST_ASSERT_EQUAL(1, (int)MODE_POWER);
+  TEST_ASSERT_EQUAL(2, (int)MODE_SOG);
+  TEST_ASSERT_EQUAL(3, (int)MODE_SOW);
+  TEST_ASSERT_EQUAL(4, (int)MODE_RANGE);
+  TEST_ASSERT_EQUAL(5, (int)MODE_COUNT);
+}
+
+void test_throttle_mode_names_count(void) {
+  // throttle_mode_names[] must have a non-empty entry for each mode
+  for (int i = 0; i < (int)MODE_COUNT; i++) {
+    TEST_ASSERT_TRUE(throttle_mode_names[i] != nullptr);
+    TEST_ASSERT_TRUE(strlen(throttle_mode_names[i]) > 0);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// parse_cmd() — new mode/target tokens
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_parse_cmd_mode(void)   { TEST_ASSERT_EQUAL(CMD_MODE,   parse_cmd("mode"));   }
+void test_parse_cmd_target(void) { TEST_ASSERT_EQUAL(CMD_TARGET, parse_cmd("target")); }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// pid_compute() — basic behaviour
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_pid_zero_error(void) {
+  pid_state_t pid = {1.0f, 0.0f, 0.0f, 0, 0, 0, 0, 255};
+  float out = pid_compute(&pid, 100.0f, 100.0f, 0.1f);
+  // zero error → output should be 0 (clamped to output_min = 0)
+  TEST_ASSERT_TRUE(out >= -0.01f && out <= 0.01f);
+}
+
+void test_pid_proportional(void) {
+  pid_state_t pid = {2.0f, 0.0f, 0.0f, 0, 0, 0, 0, 255};
+  float out = pid_compute(&pid, 50.0f, 0.0f, 0.1f);
+  // error = 50, Kp = 2 → out = 100
+  TEST_ASSERT_TRUE(out >= 99.9f && out <= 100.1f);
+}
+
+void test_pid_clamp_max(void) {
+  pid_state_t pid = {100.0f, 0.0f, 0.0f, 0, 0, 0, 0, 254};
+  float out = pid_compute(&pid, 500.0f, 0.0f, 0.1f);
+  TEST_ASSERT_LESS_OR_EQUAL(254.0f, out);
+}
+
+void test_pid_clamp_min(void) {
+  pid_state_t pid = {1.0f, 0.0f, 0.0f, 0, 0, 0, 0, 254};
+  float out = pid_compute(&pid, 0.0f, 100.0f, 0.1f);
+  // negative error → output ≤ 0, clamped to output_min = 0
+  TEST_ASSERT_LESS_OR_EQUAL(0.01f, out);
+}
+
+void test_pid_reset(void) {
+  pid_state_t pid = {1.0f, 1.0f, 0.0f, 999.0f, 999.0f, 0.0f, 0, 255};
+  pid_reset(&pid);
+  TEST_ASSERT_TRUE(pid.integral   < 0.001f && pid.integral   > -0.001f);
+  TEST_ASSERT_TRUE(pid.prev_error < 0.001f && pid.prev_error > -0.001f);
+}
+
+void test_pid_integral_winds_up_and_clamps(void) {
+  pid_state_t pid = {0.0f, 1.0f, 0.0f, 0, 0, 0, 0, 10};
+  // Accumulate 20 steps with constant error of 5; Ki=1, output_max=10
+  for (int i = 0; i < 20; i++) pid_compute(&pid, 5.0f, 0.0f, 1.0f);
+  // Anti-windup must cap output at output_max
+  float out = pid_compute(&pid, 5.0f, 0.0f, 1.0f);
+  TEST_ASSERT_LESS_OR_EQUAL(10.0f, out);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THRINF / THRCMD message format — tokenize round-trip
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_thrinf_tokenize(void) {
+  // Simulates the 7-field THRINF body (without '$' and '*xx')
+  String tok[MAX_TOKENS];
+  const char * body = "THRINF,12345,2,150,32,10,270";
+  uint8_t n = tokenize(body, ',', tok, MAX_TOKENS);
+  TEST_ASSERT_EQUAL(7, n);
+  TEST_ASSERT_EQUAL_STRING("THRINF", tok[0].c_str());
+  TEST_ASSERT_EQUAL(12345, tok[1].toInt());    // timestamp
+  TEST_ASSERT_EQUAL(2,     tok[2].toInt());    // MODE_SOG
+  TEST_ASSERT_EQUAL(150,   tok[3].toInt());    // target 15.0 kn
+  TEST_ASSERT_EQUAL(32,    tok[4].toInt());    // SOG 3.2 kn
+  TEST_ASSERT_EQUAL(10,    tok[5].toInt());    // SOW 1.0 kn
+  TEST_ASSERT_EQUAL(270,   tok[6].toInt());    // COG 270°
+}
+
+void test_thrcmd_tokenize(void) {
+  String tok[MAX_TOKENS];
+  const char * body = "THRCMD,pow:on,rev:off,reg:off,thr:145,mode:0,target:1500";
+  uint8_t n = tokenize(body, ',', tok, MAX_TOKENS);
+  TEST_ASSERT_EQUAL(7, n);
+  TEST_ASSERT_EQUAL_STRING("THRCMD",   tok[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("pow:on",   tok[1].c_str());
+  TEST_ASSERT_EQUAL_STRING("thr:145",  tok[4].c_str());
+  TEST_ASSERT_EQUAL_STRING("mode:0",   tok[5].c_str());
+  TEST_ASSERT_EQUAL_STRING("target:1500", tok[6].c_str());
+}
+
+void test_eninf_extended_tokenize(void) {
+  // Extended ENINF with curr_ma, power_w, water_kn10, slip_pct10
+  String tok[MAX_TOKENS];
+  const char * body = "ENINF,10000,1200,1,0,0,145,2400,48000,15000,720,12,350";
+  uint8_t n = tokenize(body, ',', tok, MAX_TOKENS);
+  TEST_ASSERT_EQUAL(13, n);
+  TEST_ASSERT_EQUAL(15000, tok[9].toInt());  // curr_ma
+  TEST_ASSERT_EQUAL(720,   tok[10].toInt()); // power_w
+  TEST_ASSERT_EQUAL(12,    tok[11].toInt()); // water_kn10
+  TEST_ASSERT_EQUAL(350,   tok[12].toInt()); // slip_pct10 = 35.0 %
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// calc_prop_slip()
+// ═══════════════════════════════════════════════════════════════════════════
+
+void test_slip_zero_rpm(void) {
+  // Slip undefined at zero RPM → returns 0
+  TEST_ASSERT_EQUAL(0, calc_prop_slip(0, 50, 600));
+}
+
+void test_slip_zero_pitch(void) {
+  TEST_ASSERT_EQUAL(0, calc_prop_slip(1000, 50, 0));
+}
+
+void test_slip_full_slip(void) {
+  // SOW == 0 while RPM > 0: 100 % slip (churning in place)
+  int16_t slip = calc_prop_slip(1000, 0, 600);
+  TEST_ASSERT_EQUAL(1000, slip); // 100.0 %
+}
+
+void test_slip_zero_slip(void) {
+  // SOW exactly matches theoretical speed → 0 % slip
+  // v_theoretical = 1000 * 600 / 60000 = 10 m/s
+  // 10 m/s in kn*10 = 10 / 0.05144 ≈ 194.4 → use 194
+  // expected slip ≈ (1 - 194*0.05144/10)*100 = (1 - 9.98/10)*100 = 0.2 %
+  // We just check it's near zero (< 5 = 0.5 %)
+  int16_t slip = calc_prop_slip(1000, 194, 600);
+  TEST_ASSERT_TRUE(slip >= -5 && slip <= 5);
+}
+
+void test_slip_typical(void) {
+  // Typical scenario: 1000 RPM, 600 mm pitch → v_theoretical = 10 m/s
+  // Boat doing 5 m/s (SOW = 97 kn*10) → slip = 50 %
+  // v_actual = 97 * 0.05144 = 4.99 m/s  → slip = (1 - 4.99/10)*100 ≈ 50.1 %
+  int16_t slip = calc_prop_slip(1000, 97, 600);
+  // Allow ±5 (±0.5 %) tolerance for floating-point rounding
+  TEST_ASSERT_TRUE(slip >= 495 && slip <= 510); // ~50 %
+}
+
+void test_slip_clamped_at_100(void) {
+  // Very high slip scenario should clamp at 100 %
+  int16_t slip = calc_prop_slip(100, 0, 100); // extreme slip
+  TEST_ASSERT_EQUAL(1000, slip); // clamped at 100.0 %
+}
+
+void test_slip_negative(void) {
+  // Negative slip: following current pushing boat faster than prop advance
+  // v_theoretical = 500 * 600 / 60000 = 5 m/s
+  // v_actual = 200 kn*10 * 0.05144 = 10.29 m/s → slip = (1 - 10.29/5)*100 = -105.8 → clamped -100
+  int16_t slip = calc_prop_slip(500, 200, 600);
+  TEST_ASSERT_EQUAL(-1000, slip); // clamped at -100.0 %
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // main
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -304,6 +474,36 @@ int main(void) {
   RUN_TEST(test_throttle_table_neutral);
   RUN_TEST(test_throttle_table_inner_symmetric);
   RUN_TEST(test_throttle_table_max_forward_gt_reverse);
+
+  // throttle_mode_t
+  RUN_TEST(test_throttle_mode_values);
+  RUN_TEST(test_throttle_mode_names_count);
+
+  // parse_cmd — new tokens
+  RUN_TEST(test_parse_cmd_mode);
+  RUN_TEST(test_parse_cmd_target);
+
+  // pid_compute / pid_reset
+  RUN_TEST(test_pid_zero_error);
+  RUN_TEST(test_pid_proportional);
+  RUN_TEST(test_pid_clamp_max);
+  RUN_TEST(test_pid_clamp_min);
+  RUN_TEST(test_pid_reset);
+  RUN_TEST(test_pid_integral_winds_up_and_clamps);
+
+  // message format round-trips
+  RUN_TEST(test_thrinf_tokenize);
+  RUN_TEST(test_thrcmd_tokenize);
+  RUN_TEST(test_eninf_extended_tokenize);
+
+  // calc_prop_slip
+  RUN_TEST(test_slip_zero_rpm);
+  RUN_TEST(test_slip_zero_pitch);
+  RUN_TEST(test_slip_full_slip);
+  RUN_TEST(test_slip_zero_slip);
+  RUN_TEST(test_slip_typical);
+  RUN_TEST(test_slip_clamped_at_100);
+  RUN_TEST(test_slip_negative);
 
   return UNITY_END();
 }

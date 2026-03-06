@@ -61,7 +61,8 @@ public:
     return p == std::string::npos ? -1 : (int)p;
   }
 
-  int toInt() const { return atoi(s.c_str()); }
+  int   toInt()   const { return atoi(s.c_str()); }
+  float toFloat() const { return (float)atof(s.c_str()); }
 
   String operator+(const String& o) const { return String(s + o.s); }
   String& operator+=(const String& o) { s += o.s; return *this; }
