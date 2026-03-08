@@ -1,6 +1,6 @@
 /**
  * main-throttle.cpp  –  Throttle controller firmware
- * Hardware: STM32F103C8 (BluePill)
+ * Hardware: STM32F103C8 (BluePill) or ESP32-PICO-D4
  *
  * Bus topology
  *   Serial  (USART1 PA9/PA10, 115200 baud) – shared with panel and sensor
@@ -36,7 +36,7 @@
  *   3 beeps    – sensor comms timeout
  */
 
-#if defined(THROTTLE_STM32)
+#if defined(THROTTLE_STM32) || defined(THROTTLE_ESP32)
 
 #include <Arduino.h>
 #include <HardwareSerial.h>
@@ -46,8 +46,11 @@
 #include "buttons.h"
 #include <TimerInterrupt_Generic.h>
 
+#if defined(THROTTLE_STM32)
 // USART2 (PA2=TX, PA3=RX) — not pre-instantiated by the BluePill variant
 HardwareSerial Serial2(PA3, PA2);
+// On ESP32, Serial2 is a pre-defined global; pins are set in setup() via begin()
+#endif
 
 // ── Tuning constants ──────────────────────────────────────────────────────────
 #define MAX_RPM           5000   // Rated max RPM
@@ -587,15 +590,25 @@ static void send_thrinf() {
 // ── Arduino setup / loop ──────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);  // shared bus
-  Serial2.begin(9600);   // NMEA 0183 GPS
+#if defined(THROTTLE_ESP32)
+  Serial2.begin(9600, SERIAL_8N1, NMEA_ESP32_RX, NMEA_ESP32_TX);
+#else
+  Serial2.begin(9600);   // NMEA 0183 GPS (USART2)
+#endif
 
   pinMode(LED_BRD,       OUTPUT);
   pinMode(LED_R_PIN,     OUTPUT);
   pinMode(LED_G_PIN,     OUTPUT);
   pinMode(LED_B_PIN,     OUTPUT);
   pinMode(BUZZER_PIN,    OUTPUT);
+#if defined(THROTTLE_ESP32)
+  // GPIO34/35 are input-only on ESP32; no internal pull-up — use external 10 kΩ to 3.3 V
+  pinMode(BTN_ENGINE_PIN, INPUT);
+  pinMode(BTN_PANEL_PIN,  INPUT);
+#else
   pinMode(BTN_ENGINE_PIN, INPUT_PULLUP);
   pinMode(BTN_PANEL_PIN,  INPUT_PULLUP);
+#endif
   pinMode(MODE_ENC_A,     INPUT_PULLUP);
   pinMode(MODE_ENC_B,     INPUT_PULLUP);
   pinMode(MODE_ENC_BTN,   INPUT_PULLUP);
@@ -674,4 +687,4 @@ void loop() {
   delay(10); // ~100 Hz loop
 }
 
-#endif // THROTTLE_STM32
+#endif // THROTTLE_STM32 || THROTTLE_ESP32

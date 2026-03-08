@@ -63,6 +63,52 @@
 #define BTN_B           11
 #define BTN_A           12
 
+#elif defined(THROTTLE_ESP32)
+// ESP32-PICO-D4 throttle controller
+// Serial  (UART0 GPIO1/GPIO3)  : shared bus (sensor + panel + throttle)
+// Serial2 (UART2 GPIO16/GPIO17): NMEA0183 GPS / chart-plotter input
+
+#define LED_BRD             2    // Built-in LED
+
+// Throttle position input
+#define THROTTLE_POT_PIN    36   // ADC1_CH0 (VP, input-only; no pullup needed for pot)
+#define THROTTLE_ENC_A      32   // ADC1_CH4
+#define THROTTLE_ENC_B      33   // ADC1_CH5
+
+// Mode-selector encoder
+#define MODE_ENC_A          25
+#define MODE_ENC_B          26
+#define MODE_ENC_BTN        27
+
+// Control buttons
+// GPIO34/35 are input-only on ESP32 (no internal pullup) — wire 10 kΩ pull-ups to 3.3 V
+#define BTN_ENGINE_PIN      34
+#define BTN_PANEL_PIN       35
+
+// RGB status LED (common-cathode, PWM driven via LEDC)
+#define LED_R_PIN           18
+#define LED_G_PIN           19
+#define LED_B_PIN           23
+
+// Buzzer (passive, digital toggle)
+#define BUZZER_PIN          4
+
+// NMEA 0183 GPS/chart-plotter port (UART2)
+// RX receives GPS NMEA sentences (enable with -D NMEA0183_THROTTLE).
+// TX transmits motor NMEA sentences ($IIRPM, $IIXDR) always when THROTTLE_ESP32.
+#define NMEA_ESP32_RX       16   // U2_RXD
+#define NMEA_ESP32_TX       17   // U2_TXD
+#if !defined(NMEA0183_PANEL)
+#  define NMEA0183_THROTTLE
+#endif
+
+// NMEA 2000 CAN bus (ESP32 TWAI peripheral)
+// Receives:  PGN 128259 — Speed Through Water, PGN 129026 — COG & SOG Rapid
+// Transmits: PGN 127488 — Engine Parameters Rapid, PGN 127508 — Battery Status
+// Enable with -D NMEA2000 build flag; requires SN65HVD230 or ISO1050 transceiver
+#define NMEA2000_CAN_RX     22
+#define NMEA2000_CAN_TX     21
+
 #elif defined(THROTTLE_STM32)
 // BluePill STM32F103 based throttle controller
 // Serial  (USART1 PA9/PA10) : shared bus (sensor + panel + throttle)
